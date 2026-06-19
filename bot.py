@@ -3,7 +3,6 @@ import sys
 import asyncio
 import logging
 import sqlite3
-import re
 from datetime import datetime
 import discord
 from discord import app_commands, Forbidden, HTTPException
@@ -197,7 +196,6 @@ def _strip_tier_prefix(nick: str) -> str:
     """Remove tier prefix from a nickname. Format: [TIER GAMEMODE] or [TIER]"""
     if not nick:
         return nick
-    # Remove bracketed prefix like "[LT5 SWORD] " if present
     if nick.startswith("[") and "]" in nick:
         remainder = nick.split("]", 1)[1].strip()
         return remainder if remainder else nick
@@ -212,7 +210,6 @@ async def _apply_tier_nickname(member: discord.Member, gamemode: str, tier: str)
         allowed = MAX_NICK_LEN - len(prefix)
         
         if allowed <= 0:
-            # Prefix alone exceeds limit; try short format [TIER]
             short_prefix = f"[{tier}] "
             allowed = MAX_NICK_LEN - len(short_prefix)
             if allowed <= 0:
@@ -235,11 +232,9 @@ async def _remove_tier_nickname(member: discord.Member):
         current_nick = member.nick or member.name
         stripped = _strip_tier_prefix(current_nick)
         
-        # Truncate to MAX_NICK_LEN if needed
         if len(stripped) > MAX_NICK_LEN:
             stripped = stripped[:MAX_NICK_LEN]
         
-        # Only change if different
         if stripped != (member.nick or member.name):
             await member.edit(nick=stripped, reason="Remove tier prefix")
             log.info("Removed nickname prefix for %s. New nickname: %s", member, stripped)
@@ -306,7 +301,6 @@ class TicketModal(discord.ui.Modal, title="Tier Test Application"):
         guild = interaction.guild
         category = guild.get_channel(TICKET_CATEGORY_ID)
 
-        # Anti-duplicate: block if user already has an open ticket
         if category:
             for ch in category.channels:
                 ow = ch.overwrites_for(interaction.user)
@@ -350,7 +344,7 @@ class TicketModal(discord.ui.Modal, title="Tier Test Application"):
                 self.ign.value,
             )
         except ValueError:
-            pass  # IGN already linked to another account — ticket still opens
+            pass
         await interaction.response.send_message(
             f"Ticket created: {channel.mention}", ephemeral=True
         )
@@ -486,7 +480,6 @@ async def tier(
     ensure_user(str(interaction.user.id), interaction.user.display_name)
     insert_tier_record(str(user.id), gm, tr, str(interaction.user.id))
 
-    # Apply tier nickname prefix
     await _apply_tier_nickname(user, gm, tr)
 
     channel = interaction.guild.get_channel(RESULT_CHANNELS.get(gm))
@@ -538,7 +531,6 @@ async def untier(
         notes=f"Removed: {removed_names}"
     )
 
-    # Remove tier nickname prefix
     await _remove_tier_nickname(user)
 
     channel = interaction.guild.get_channel(RESULT_CHANNELS.get(gm))
