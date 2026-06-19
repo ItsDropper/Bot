@@ -1,12 +1,27 @@
 import os
+import sys
 import asyncio
+import logging
 import sqlite3
 from datetime import datetime
 import discord
 from discord import app_commands
 from aiohttp import web
 
-TOKEN = os.environ["DISCORD_TOKEN"]
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    stream=sys.stdout,
+)
+log = logging.getLogger("bot")
+
+TOKEN = os.environ.get("DISCORD_TOKEN") or os.environ.get("DISCORD_BOT_TOKEN")
+if not TOKEN:
+    log.error(
+        "Discord token not set. Add DISCORD_TOKEN or DISCORD_BOT_TOKEN in Render → Environment."
+    )
+    raise RuntimeError("DISCORD_TOKEN or DISCORD_BOT_TOKEN environment variable is required")
+
 PORT = int(os.environ.get("PORT", 3000))
 DB_PATH = "tiers.db"
 
@@ -65,11 +80,28 @@ def insert_tier_record(user_id: str, gamemode: str, tier: str, tester_id: str, n
 def fetch_user_history(discord_id: str, limit: int = 10):
     with get_db() as conn:
         rows = conn.execute(
-            "SELECT * FROM tier_history WHERE user_id = ?"
-            " ORDER BY timestamp DESC LIMIT ?",
+            """
+            SELECT th.*, tester.username AS tester_name
+            FROM tier_history th
+            LEFT JOIN users tester ON tester.discord_id = th.tester_id
+            WHERE th.user_id = ?
+            ORDER BY th.timestamp DESC
+            LIMIT ?
+            """,
             (discord_id, limit)
         ).fetchall()
     return rows
+
+def get_tiers_from_roles(member: discord.Member) -> dict[str, str]:
+    tiers = {}
+    for gm in GAMEMODES:
+        for role in member.roles:
+            if role.name.upper().endswith(f" {gm.upper()}"):
+                tier_name = role.name.upper().replace(f" {gm.upper()}", "").strip()
+                if tier_name in TIERS:
+                    tiers[gm] = tier_name
+                    break
+    return tiers
 
 def fetch_leaderboard(gamemode: str):
     with get_db() as conn:
@@ -169,8 +201,9 @@ class TicketModal(discord.ui.Modal, title="Tier Test Application"):
             overwrites[tester_role] = discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True)
 
         safe_name = interaction.user.name.lower().replace(" ", "-")[:20]
+        safe_gamemode = self.gamemode.lower().replace(" ", "-")
         channel = await guild.create_text_channel(
-            name=f"ticket-{safe_name}",
+            name=f"ticket-{safe_gamemode}-{safe_name}",
             category=category,
             overwrites=overwrites
         )
@@ -259,8 +292,13 @@ class Client(discord.Client):
         for guild in self.guilds:
             tree.copy_global_to(guild=guild)
             await tree.sync(guild=guild)
-        print(f"Logged in as {self.user} (ID: {self.user.id})")
-        print(f"Commands synced to {len(self.guilds)} guild(s).")
+            log.info("Synced commands to guild: %s (%s)", guild.name, guild.id)
+        log.info("Logged in as %s (ID: %s)", self.user, self.user.id)
+        log.info("In %s guild(s). Web API on port %s.", len(self.guilds), PORT)
+        if not self.guilds:
+            log.warning(
+                "Bot is not in any servers. Invite it with the applications.commands scope."
+            )
 
 client = Client(intents=intents)
 tree = app_commands.CommandTree(client)
@@ -296,8 +334,8 @@ async def tier(
 
     await user.add_roles(role)
 
-    ensure_user(str(user.id), user.name)
-    ensure_user(str(interaction.user.id), interaction.user.name)
+    ensure_user(str(user.id), user.display_name)
+    ensure_user(str(interaction.user.id), interaction.user.display_name)
     insert_tier_record(str(user.id), gm, tr, str(interaction.user.id))
 
     channel = interaction.guild.get_channel(RESULT_CHANNELS.get(gm))
@@ -341,13 +379,20 @@ async def untier(
 
     await user.remove_roles(*removed_roles)
 
+    ensure_user(str(user.id), user.display_name)
+    ensure_user(str(interaction.user.id), interaction.user.display_name)
+    removed_names = ", ".join(r.name for r in removed_roles)
+    insert_tier_record(
+        str(user.id), gm, "REMOVED", str(interaction.user.id),
+        notes=f"Removed: {removed_names}"
+    )
+
     channel = interaction.guild.get_channel(RESULT_CHANNELS.get(gm))
     embed = discord.Embed(
         title="Tier Removed",
         description=f"{user.mention} was untied",
         color=discord.Color.red()
     )
-    removed_names = ", ".join(r.name for r in removed_roles)
     embed.add_field(name="Removed Tier", value=removed_names)
     embed.add_field(name="Gamemode", value=gm.upper())
     embed.add_field(name="Staff", value=interaction.user.mention)
@@ -404,21 +449,47 @@ async def history(
     interaction: discord.Interaction,
     user: discord.Member
 ):
-    rows = fetch_user_history(str(user.id), limit=10)
-    embed = discord.Embed(
-        title=f"Tier History — {user.display_name}",
-        color=discord.Color.blurple()
-    )
-    if not rows:
-        embed.description = "No tier history found for this user."
-    else:
-        lines = []
-        for row in rows:
-            ts = row["timestamp"][:10]
-            lines.append(f"`{ts}` **{row['tier']}** in {row['gamemode'].upper()}")
-        embed.description = "\n".join(lines)
+    await interaction.response.defer()
 
-    await interaction.response.send_message(embed=embed)
+    try:
+        rows = fetch_user_history(str(user.id), limit=10)
+        embed = discord.Embed(
+            title=f"Tier History — {user.display_name}",
+            color=discord.Color.blurple()
+        )
+
+        if rows:
+            lines = []
+            for row in rows:
+                ts = (row["timestamp"] or "")[:10]
+                gm = row["gamemode"].upper()
+                if row["tier"] == "REMOVED":
+                    detail = row["notes"] or "Tier removed"
+                    lines.append(f"`{ts}` {detail} ({gm})")
+                else:
+                    tester = row["tester_name"] or "Unknown"
+                    lines.append(f"`{ts}` **{row['tier']}** {gm} — by {tester}")
+            embed.description = "\n".join(lines)
+        else:
+            current = get_tiers_from_roles(user)
+            if current:
+                lines = [f"**{gm.upper()}** — {tier}" for gm, tier in sorted(current.items())]
+                embed.description = (
+                    "No logged history in the database.\n"
+                    "_History is recorded when staff use `/tier`. "
+                    "Data also resets when the bot redeploys on Render._"
+                )
+                embed.add_field(name="Current tiers (from roles)", value="\n".join(lines), inline=False)
+            else:
+                embed.description = "No tier history found for this user."
+
+        await interaction.followup.send(embed=embed)
+    except Exception:
+        log.exception("history command failed for user %s", user.id)
+        await interaction.followup.send(
+            "Something went wrong while fetching history. Check the bot logs.",
+            ephemeral=True
+        )
 
 
 @tree.command(name="stats", description="Show a user's current tier across all gamemodes")
@@ -431,19 +502,13 @@ async def stats(
         color=discord.Color.blurple()
     )
 
-    lines = []
-    for gm in GAMEMODES:
-        current_tier = None
-        for role in user.roles:
-            if role.name.upper().endswith(f" {gm.upper()}"):
-                tier_name = role.name.upper().replace(f" {gm.upper()}", "").strip()
-                if tier_name in TIERS:
-                    current_tier = tier_name
-                    break
-        if current_tier:
-            lines.append(f"**{gm.upper()}** — {current_tier}")
+    current = get_tiers_from_roles(user)
+    if current:
+        lines = [f"**{gm.upper()}** — {tier}" for gm, tier in sorted(current.items())]
+        embed.description = "\n".join(lines)
+    else:
+        embed.description = "No tiers found for this user."
 
-    embed.description = "\n".join(lines) if lines else "No tiers found for this user."
     await interaction.response.send_message(embed=embed)
 
 
@@ -463,19 +528,182 @@ async def sendpanel(interaction: discord.Interaction):
     await channel.send(embed=embed, view=TierTestView())
     await interaction.response.send_message("Panel sent!", ephemeral=True)
 
-# ── Web health check ──────────────────────────────────────────────────────────
+# ── Web health check + public API ─────────────────────────────────────────────
+
+TIER_RANK = {t: i for i, t in enumerate(TIERS)}
+
+def _get_current_tiers(discord_id: str, conn):
+    return conn.execute(
+        """
+        SELECT th.gamemode, th.tier, th.timestamp
+        FROM tier_history th
+        WHERE th.user_id = ?
+          AND th.id = (
+              SELECT id FROM tier_history
+              WHERE user_id = th.user_id AND gamemode = th.gamemode
+              ORDER BY timestamp DESC LIMIT 1
+          )
+        """,
+        (discord_id,)
+    ).fetchall()
 
 async def health(request):
     return web.Response(text="ok")
 
+async def api_leaderboard_overall(request):
+    import json
+    with get_db() as conn:
+        rows = conn.execute(
+            """
+            SELECT u.discord_id, u.username, th.gamemode, th.tier
+            FROM tier_history th
+            LEFT JOIN users u ON u.discord_id = th.user_id
+            WHERE th.id = (
+                SELECT id FROM tier_history
+                WHERE user_id = th.user_id AND gamemode = th.gamemode
+                ORDER BY timestamp DESC LIMIT 1
+            )
+            """
+        ).fetchall()
+
+    player_map = {}
+    for row in rows:
+        score = TIER_RANK.get(row["tier"], -1)
+        if score < 0:
+            continue
+        existing = player_map.get(row["discord_id"])
+        if not existing or score > existing["score"]:
+            player_map[row["discord_id"]] = {
+                "discord_id": row["discord_id"],
+                "username": row["username"] or "Unknown",
+                "score": score,
+                "tier": row["tier"],
+                "gamemode": row["gamemode"],
+            }
+
+    sorted_players = sorted(player_map.values(), key=lambda p: p["score"], reverse=True)[:50]
+    result = [{"rank": i + 1, **p} for i, p in enumerate(sorted_players)]
+    return web.Response(text=json.dumps(result), content_type="application/json")
+
+async def api_leaderboard_gamemode(request):
+    import json
+    gamemode = request.match_info["gamemode"].lower()
+    if gamemode not in GAMEMODES:
+        return web.Response(status=400, text=json.dumps({"error": "Invalid gamemode"}), content_type="application/json")
+
+    with get_db() as conn:
+        rows = conn.execute(
+            """
+            SELECT u.discord_id, u.username, th.tier, th.timestamp
+            FROM tier_history th
+            LEFT JOIN users u ON u.discord_id = th.user_id
+            WHERE th.gamemode = ?
+              AND th.id = (
+                  SELECT id FROM tier_history
+                  WHERE user_id = th.user_id AND gamemode = th.gamemode
+                  ORDER BY timestamp DESC LIMIT 1
+              )
+            """,
+            (gamemode,)
+        ).fetchall()
+
+    sorted_rows = sorted(rows, key=lambda r: TIER_RANK.get(r["tier"], -1), reverse=True)
+    result = [
+        {
+            "rank": i + 1,
+            "username": r["username"] or "Unknown",
+            "discord_id": r["discord_id"],
+            "tier": r["tier"],
+            "gamemode": gamemode,
+            "score": TIER_RANK.get(r["tier"], -1),
+        }
+        for i, r in enumerate(sorted_rows)
+        if TIER_RANK.get(r["tier"], -1) >= 0
+    ][:50]
+    return web.Response(text=json.dumps(result), content_type="application/json")
+
+async def api_players_search(request):
+    import json
+    q = request.rel_url.query.get("q", "").strip()
+    if not q:
+        return web.Response(text="[]", content_type="application/json")
+
+    with get_db() as conn:
+        users = conn.execute(
+            "SELECT discord_id, username FROM users WHERE username LIKE ? LIMIT 20",
+            (f"%{q}%",)
+        ).fetchall()
+
+        result = []
+        for u in users:
+            best = conn.execute(
+                """
+                SELECT th.tier, th.gamemode
+                FROM tier_history th
+                WHERE th.user_id = ?
+                  AND th.id = (
+                      SELECT id FROM tier_history
+                      WHERE user_id = th.user_id AND gamemode = th.gamemode
+                      ORDER BY timestamp DESC LIMIT 1
+                  )
+                ORDER BY th.tier DESC LIMIT 1
+                """,
+                (u["discord_id"],)
+            ).fetchone()
+            result.append({
+                "discord_id": u["discord_id"],
+                "username": u["username"],
+                "best_tier": best["tier"] if best else None,
+                "best_gamemode": best["gamemode"] if best else None,
+            })
+
+    return web.Response(text=json.dumps(result), content_type="application/json")
+
+async def api_player_profile(request):
+    import json
+    username = request.match_info["username"]
+
+    with get_db() as conn:
+        user = conn.execute(
+            "SELECT discord_id, username FROM users WHERE username LIKE ? LIMIT 1",
+            (username,)
+        ).fetchone()
+
+        if not user:
+            return web.Response(status=404, text=json.dumps({"error": "Player not found"}), content_type="application/json")
+
+        tiers = _get_current_tiers(user["discord_id"], conn)
+        history = conn.execute(
+            "SELECT gamemode, tier, timestamp, notes FROM tier_history WHERE user_id = ? ORDER BY timestamp DESC LIMIT 20",
+            (user["discord_id"],)
+        ).fetchall()
+
+    result = {
+        "discord_id": user["discord_id"],
+        "username": user["username"],
+        "tiers": [{"gamemode": r["gamemode"], "tier": r["tier"], "timestamp": r["timestamp"]} for r in tiers],
+        "history": [{"gamemode": r["gamemode"], "tier": r["tier"], "timestamp": r["timestamp"], "notes": r["notes"]} for r in history],
+    }
+    return web.Response(text=json.dumps(result), content_type="application/json")
+
 async def main():
     app = web.Application()
     app.router.add_get("/", health)
+    app.router.add_get("/api/leaderboard/overall", api_leaderboard_overall)
+    app.router.add_get("/api/leaderboard/{gamemode}", api_leaderboard_gamemode)
+    app.router.add_get("/api/players/search", api_players_search)
+    app.router.add_get("/api/players/{username}", api_player_profile)
     runner = web.AppRunner(app)
     await runner.setup()
     site = web.TCPSite(runner, "0.0.0.0", PORT)
     await site.start()
-    print(f"Health check running on port {PORT}")
-    await client.start(TOKEN)
+    log.info("Health check listening on 0.0.0.0:%s", PORT)
 
-asyncio.run(main())
+    try:
+        await client.start(TOKEN)
+    except discord.LoginFailure:
+        log.error("Login failed — token is invalid. Reset it in the Discord Developer Portal.")
+        raise
+
+if __name__ == "__main__":
+    asyncio.run(main())
