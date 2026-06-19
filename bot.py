@@ -3,9 +3,10 @@ import sys
 import asyncio
 import logging
 import sqlite3
+import re
 from datetime import datetime
 import discord
-from discord import app_commands
+from discord import app_commands, Forbidden, HTTPException
 from aiohttp import web
 
 logging.basicConfig(
@@ -29,9 +30,11 @@ PANEL_CHANNEL_ID = 1517249587931250760
 TICKET_CATEGORY_ID = 1514689354281259170
 TESTER_ROLE_ID = 1514260245034041485
 
+MAX_NICK_LEN = 32
+
 intents = discord.Intents.default()
 
-# ── Database ──────────────────────────────────────────────────────────────────
+# ── Database ────────────────────────────────────────────────────────────────
 
 def get_db():
     conn = sqlite3.connect(DB_PATH)
@@ -188,7 +191,64 @@ def fetch_leaderboard(gamemode: str):
         ).fetchall()
     return rows
 
-# ── Constants ─────────────────────────────────────────────────────────────────
+# ── Nickname helpers ────────────────────────────────────────────────────────
+
+def _strip_tier_prefix(nick: str) -> str:
+    """Remove tier prefix from a nickname. Format: [TIER GAMEMODE] or [TIER]"""
+    if not nick:
+        return nick
+    # Remove bracketed prefix like "[LT5 SWORD] " if present
+    if nick.startswith("[") and "]" in nick:
+        remainder = nick.split("]", 1)[1].strip()
+        return remainder if remainder else nick
+    return nick
+
+async def _apply_tier_nickname(member: discord.Member, gamemode: str, tier: str):
+    """Set member's nickname with tier prefix. Format: [TIER GAMEMODE] BaseName"""
+    try:
+        base = member.nick or member.name
+        base = _strip_tier_prefix(base)
+        prefix = f"[{tier} {gamemode.upper()}] "
+        allowed = MAX_NICK_LEN - len(prefix)
+        
+        if allowed <= 0:
+            # Prefix alone exceeds limit; try short format [TIER]
+            short_prefix = f"[{tier}] "
+            allowed = MAX_NICK_LEN - len(short_prefix)
+            if allowed <= 0:
+                log.warning("Cannot set nickname for %s: tier prefix too long", member)
+                return
+            prefix = short_prefix
+        
+        new_nick = f"{prefix}{base[:allowed]}"
+        if new_nick != (member.nick or member.name):
+            await member.edit(nick=new_nick, reason="Apply tier prefix")
+            log.info("Set nickname for %s to: %s", member, new_nick)
+    except Forbidden:
+        log.warning("Cannot change nickname for %s — missing Manage Nicknames permission or role hierarchy", member)
+    except HTTPException as e:
+        log.exception("Failed to set nickname for %s: %s", member, e)
+
+async def _remove_tier_nickname(member: discord.Member):
+    """Remove tier prefix from member's nickname."""
+    try:
+        current_nick = member.nick or member.name
+        stripped = _strip_tier_prefix(current_nick)
+        
+        # Truncate to MAX_NICK_LEN if needed
+        if len(stripped) > MAX_NICK_LEN:
+            stripped = stripped[:MAX_NICK_LEN]
+        
+        # Only change if different
+        if stripped != (member.nick or member.name):
+            await member.edit(nick=stripped, reason="Remove tier prefix")
+            log.info("Removed nickname prefix for %s. New nickname: %s", member, stripped)
+    except Forbidden:
+        log.warning("Cannot change nickname for %s — missing Manage Nicknames permission or role hierarchy", member)
+    except HTTPException as e:
+        log.exception("Failed to remove nickname for %s: %s", member, e)
+
+# ── Constants ────────────────────────────────────────────────────────────────
 
 GAMEMODES = ["sword", "axe", "mace", "uhc", "netheriteop", "pot", "smp", "crystal", "cart pvp"]
 
@@ -208,7 +268,7 @@ RESULT_CHANNELS = {
     "cart pvp": 1514303767523098724,
 }
 
-# ── Permission check ──────────────────────────────────────────────────────────
+# ── Permission check ────────────────────────────────────────────────────────
 
 def tester_only():
     async def predicate(interaction: discord.Interaction):
@@ -223,7 +283,7 @@ def tester_only():
         return False
     return app_commands.check(predicate)
 
-# ── Ticket UI ─────────────────────────────────────────────────────────────────
+# ── Ticket UI ───────────────────────────────────────────────────────────────
 
 class TicketModal(discord.ui.Modal, title="Tier Test Application"):
     ign = discord.ui.TextInput(
@@ -354,7 +414,7 @@ class CloseTicketView(discord.ui.View):
         await interaction.response.send_message("Closing ticket...", ephemeral=True)
         await interaction.channel.delete()
 
-# ── Bot setup ─────────────────────────────────────────────────────────────────
+# ── Bot setup ───────────────────────────────────────────────────────────────
 
 class Client(discord.Client):
     async def setup_hook(self):
@@ -377,7 +437,7 @@ class Client(discord.Client):
 client = Client(intents=intents)
 tree = app_commands.CommandTree(client)
 
-# ── Commands ──────────────────────────────────────────────────────────────────
+# ── Commands ────────────────────────────────────────────────────────────────
 
 @tree.command(name="tier", description="Tier a user")
 @tester_only()
@@ -425,6 +485,9 @@ async def tier(
         ensure_user(str(user.id), user.display_name)
     ensure_user(str(interaction.user.id), interaction.user.display_name)
     insert_tier_record(str(user.id), gm, tr, str(interaction.user.id))
+
+    # Apply tier nickname prefix
+    await _apply_tier_nickname(user, gm, tr)
 
     channel = interaction.guild.get_channel(RESULT_CHANNELS.get(gm))
     embed = discord.Embed(
@@ -475,10 +538,13 @@ async def untier(
         notes=f"Removed: {removed_names}"
     )
 
+    # Remove tier nickname prefix
+    await _remove_tier_nickname(user)
+
     channel = interaction.guild.get_channel(RESULT_CHANNELS.get(gm))
     embed = discord.Embed(
         title="Tier Removed",
-        description=f"{user.mention} was untied",
+        description=f"{user.mention} had their tier removed",
         color=discord.Color.red()
     )
     embed.add_field(name="Removed Tier", value=removed_names)
@@ -665,7 +731,7 @@ async def sendpanel(interaction: discord.Interaction):
     await channel.send(embed=embed, view=TierTestView())
     await interaction.response.send_message("Panel sent!", ephemeral=True)
 
-# ── Web health check + public API ─────────────────────────────────────────────
+# ── Web health check + public API ────────────────────────────────────────────
 
 TIER_RANK = {t: i for i, t in enumerate(TIERS)}
 
