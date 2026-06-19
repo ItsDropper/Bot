@@ -6,7 +6,7 @@ import discord
 from discord import app_commands
 from aiohttp import web
 
-TOKEN = os.environ["DISCORD_BOT_TOKEN"]
+TOKEN = os.environ["DISCORD_TOKEN"]
 PORT = int(os.environ.get("PORT", 3000))
 DB_PATH = "tiers.db"
 
