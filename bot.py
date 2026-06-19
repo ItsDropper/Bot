@@ -42,9 +42,18 @@ def init_db():
     with get_db() as conn:
         conn.execute("""
             CREATE TABLE IF NOT EXISTS users (
-                discord_id TEXT PRIMARY KEY,
-                username   TEXT NOT NULL
+                discord_id    TEXT PRIMARY KEY,
+                username      TEXT NOT NULL,
+                minecraft_ign TEXT
             )
+        """)
+        # migrate existing databases
+        cols = {row[1] for row in conn.execute("PRAGMA table_info(users)")}
+        if "minecraft_ign" not in cols:
+            conn.execute("ALTER TABLE users ADD COLUMN minecraft_ign TEXT")
+        conn.execute("""
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_users_minecraft_ign
+            ON users(minecraft_ign) WHERE minecraft_ign IS NOT NULL
         """)
         conn.execute("""
             CREATE TABLE IF NOT EXISTS tier_history (
@@ -59,14 +68,71 @@ def init_db():
         """)
         conn.commit()
 
-def ensure_user(discord_id: str, username: str):
+def ensure_user(discord_id: str, username: str, minecraft_ign: str = None):
     with get_db() as conn:
+        if minecraft_ign:
+            conn.execute(
+                """
+                INSERT INTO users (discord_id, username, minecraft_ign) VALUES (?, ?, ?)
+                ON CONFLICT(discord_id) DO UPDATE SET
+                    username = excluded.username,
+                    minecraft_ign = excluded.minecraft_ign
+                """,
+                (discord_id, username, minecraft_ign.strip()),
+            )
+        else:
+            conn.execute(
+                """
+                INSERT INTO users (discord_id, username) VALUES (?, ?)
+                ON CONFLICT(discord_id) DO UPDATE SET username = excluded.username
+                """,
+                (discord_id, username),
+            )
+        conn.commit()
+
+def link_minecraft_ign(discord_id: str, username: str, minecraft_ign: str):
+    ign = minecraft_ign.strip()
+    with get_db() as conn:
+        taken = conn.execute(
+            "SELECT discord_id FROM users WHERE minecraft_ign = ? AND discord_id != ?",
+            (ign, discord_id),
+        ).fetchone()
+        if taken:
+            raise ValueError("That Minecraft username is already linked to another Discord account.")
         conn.execute(
-            "INSERT INTO users (discord_id, username) VALUES (?, ?)"
-            " ON CONFLICT(discord_id) DO UPDATE SET username=excluded.username",
-            (discord_id, username)
+            """
+            INSERT INTO users (discord_id, username, minecraft_ign) VALUES (?, ?, ?)
+            ON CONFLICT(discord_id) DO UPDATE SET
+                username = excluded.username,
+                minecraft_ign = excluded.minecraft_ign
+            """,
+            (discord_id, username, ign),
         )
         conn.commit()
+
+def get_user_by_ign(minecraft_ign: str):
+    with get_db() as conn:
+        return conn.execute(
+            "SELECT discord_id, username, minecraft_ign FROM users WHERE minecraft_ign = ? COLLATE NOCASE",
+            (minecraft_ign.strip(),),
+        ).fetchone()
+
+def get_tiers_for_discord_id(discord_id: str, conn=None):
+    query = """
+        SELECT th.gamemode, th.tier, th.timestamp
+        FROM tier_history th
+        WHERE th.user_id = ?
+          AND th.tier != 'REMOVED'
+          AND th.id = (
+              SELECT id FROM tier_history
+              WHERE user_id = th.user_id AND gamemode = th.gamemode
+              ORDER BY timestamp DESC LIMIT 1
+          )
+    """
+    if conn:
+        return conn.execute(query, (discord_id,)).fetchall()
+    with get_db() as conn:
+        return conn.execute(query, (discord_id,)).fetchall()
 
 def insert_tier_record(user_id: str, gamemode: str, tier: str, tester_id: str, notes: str = None):
     with get_db() as conn:
@@ -217,6 +283,14 @@ class TicketModal(discord.ui.Modal, title="Tier Test Application"):
 
         ping = tester_role.mention if tester_role else "@tester"
         await channel.send(content=ping, embed=embed, view=CloseTicketView())
+        try:
+            link_minecraft_ign(
+                str(interaction.user.id),
+                interaction.user.display_name,
+                self.ign.value,
+            )
+        except ValueError:
+            pass  # IGN already linked to another account — ticket still opens
         await interaction.response.send_message(
             f"Ticket created: {channel.mention}", ephemeral=True
         )
@@ -311,11 +385,18 @@ tree = app_commands.CommandTree(client)
     gamemode=[app_commands.Choice(name=g, value=g) for g in GAMEMODES],
     tier=[app_commands.Choice(name=t, value=t) for t in TIERS]
 )
+@app_commands.describe(
+    user="Discord member to tier",
+    tier="Tier to assign",
+    gamemode="Gamemode",
+    minecraft_ign="Optional Minecraft username for the mod nametag",
+)
 async def tier(
     interaction: discord.Interaction,
     user: discord.Member,
     tier: app_commands.Choice[str],
-    gamemode: app_commands.Choice[str]
+    gamemode: app_commands.Choice[str],
+    minecraft_ign: str = None,
 ):
     gm = gamemode.value
     tr = tier.value
@@ -334,7 +415,14 @@ async def tier(
 
     await user.add_roles(role)
 
-    ensure_user(str(user.id), user.display_name)
+    if minecraft_ign:
+        try:
+            link_minecraft_ign(str(user.id), user.display_name, minecraft_ign)
+        except ValueError as e:
+            await interaction.response.send_message(str(e), ephemeral=True)
+            return
+    else:
+        ensure_user(str(user.id), user.display_name)
     ensure_user(str(interaction.user.id), interaction.user.display_name)
     insert_tier_record(str(user.id), gm, tr, str(interaction.user.id))
 
@@ -512,6 +600,28 @@ async def stats(
     await interaction.response.send_message(embed=embed)
 
 
+@tree.command(name="link", description="Link your Minecraft username for the tier mod")
+@app_commands.describe(minecraft_ign="Your exact Minecraft username (IGN)")
+async def link(
+    interaction: discord.Interaction,
+    minecraft_ign: str,
+):
+    try:
+        link_minecraft_ign(
+            str(interaction.user.id),
+            interaction.user.display_name,
+            minecraft_ign,
+        )
+    except ValueError as e:
+        await interaction.response.send_message(str(e), ephemeral=True)
+        return
+
+    await interaction.response.send_message(
+        f"Linked **{minecraft_ign.strip()}** to your Discord account.",
+        ephemeral=True,
+    )
+
+
 @tree.command(name="sendpanel", description="Send the tier test panel to the panel channel")
 async def sendpanel(interaction: discord.Interaction):
     channel = interaction.guild.get_channel(PANEL_CHANNEL_ID)
@@ -533,19 +643,69 @@ async def sendpanel(interaction: discord.Interaction):
 TIER_RANK = {t: i for i, t in enumerate(TIERS)}
 
 def _get_current_tiers(discord_id: str, conn):
-    return conn.execute(
-        """
-        SELECT th.gamemode, th.tier, th.timestamp
-        FROM tier_history th
-        WHERE th.user_id = ?
-          AND th.id = (
-              SELECT id FROM tier_history
-              WHERE user_id = th.user_id AND gamemode = th.gamemode
-              ORDER BY timestamp DESC LIMIT 1
-          )
-        """,
-        (discord_id,)
-    ).fetchall()
+    return get_tiers_for_discord_id(discord_id, conn)
+
+async def api_mc_player(request):
+    import json
+    ign = request.match_info["ign"]
+    user = get_user_by_ign(ign)
+    if not user:
+        return web.Response(
+            status=404,
+            text=json.dumps({"error": "Player not found", "ign": ign}),
+            content_type="application/json",
+        )
+
+    tiers_rows = get_tiers_for_discord_id(user["discord_id"])
+    tiers = {r["gamemode"]: r["tier"] for r in tiers_rows}
+    result = {
+        "ign": user["minecraft_ign"],
+        "discord_id": user["discord_id"],
+        "discord_username": user["username"],
+        "tiers": tiers,
+    }
+    return web.Response(text=json.dumps(result), content_type="application/json")
+
+async def api_mc_leaderboard(request):
+    import json
+    gamemode = request.match_info["gamemode"].lower()
+    if gamemode not in GAMEMODES:
+        return web.Response(
+            status=400,
+            text=json.dumps({"error": "Invalid gamemode"}),
+            content_type="application/json",
+        )
+
+    with get_db() as conn:
+        rows = conn.execute(
+            """
+            SELECT u.minecraft_ign, th.tier
+            FROM tier_history th
+            JOIN users u ON u.discord_id = th.user_id
+            WHERE th.gamemode = ?
+              AND u.minecraft_ign IS NOT NULL
+              AND th.tier != 'REMOVED'
+              AND th.id = (
+                  SELECT id FROM tier_history
+                  WHERE user_id = th.user_id AND gamemode = th.gamemode
+                  ORDER BY timestamp DESC LIMIT 1
+              )
+            """,
+            (gamemode,),
+        ).fetchall()
+
+    sorted_rows = sorted(rows, key=lambda r: TIER_RANK.get(r["tier"], -1), reverse=True)
+    result = [
+        {
+            "rank": i + 1,
+            "ign": r["minecraft_ign"],
+            "tier": r["tier"],
+            "gamemode": gamemode,
+        }
+        for i, r in enumerate(sorted_rows)
+        if TIER_RANK.get(r["tier"], -1) >= 0
+    ]
+    return web.Response(text=json.dumps(result), content_type="application/json")
 
 async def health(request):
     return web.Response(text="ok")
@@ -693,6 +853,8 @@ async def main():
     app.router.add_get("/api/leaderboard/{gamemode}", api_leaderboard_gamemode)
     app.router.add_get("/api/players/search", api_players_search)
     app.router.add_get("/api/players/{username}", api_player_profile)
+    app.router.add_get("/api/mc/player/{ign}", api_mc_player)
+    app.router.add_get("/api/mc/leaderboard/{gamemode}", api_mc_leaderboard)
     runner = web.AppRunner(app)
     await runner.setup()
     site = web.TCPSite(runner, "0.0.0.0", PORT)
