@@ -622,6 +622,33 @@ async def link(
     )
 
 
+@tree.command(name="checklink", description="Check if a user has linked their Minecraft username")
+@app_commands.describe(user="Discord member to check")
+async def checklink(
+    interaction: discord.Interaction,
+    user: discord.Member,
+):
+    with get_db() as conn:
+        row = conn.execute(
+            "SELECT minecraft_ign FROM users WHERE discord_id = ?",
+            (str(user.id),),
+        ).fetchone()
+
+    if not row or not row["minecraft_ign"]:
+        await interaction.response.send_message(
+            f"{user.mention} has **not** linked a Minecraft username. They need `/link`.",
+            ephemeral=True,
+        )
+        return
+
+    current = get_tiers_from_roles(user)
+    await interaction.response.send_message(
+        f"{user.mention} is linked as **{row['minecraft_ign']}**.\n"
+        f"Discord tiers: {', '.join(f'{gm}={t}' for gm, t in current.items()) or 'none'}",
+        ephemeral=True,
+    )
+
+
 @tree.command(name="sendpanel", description="Send the tier test panel to the panel channel")
 async def sendpanel(interaction: discord.Interaction):
     channel = interaction.guild.get_channel(PANEL_CHANNEL_ID)
