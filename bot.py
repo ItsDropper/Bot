@@ -1,4 +1,3 @@
-
 import os
 import asyncio
 import sqlite3
@@ -10,6 +9,35 @@ from aiohttp import web
 TOKEN = os.environ["DISCORD_BOT_TOKEN"]
 PORT = int(os.environ.get("PORT", 3001))
 DB_PATH = "tiers.db"
+GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN")
+GITHUB_REPO = "Itsdropper/bot"
+GITHUB_FILE_PATH = "tiers.db"
+
+async def backup_db_to_github():
+    try:
+        import base64
+        import aiohttp
+        with open(DB_PATH, "rb") as f:
+            content = base64.b64encode(f.read()).decode()
+        url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{GITHUB_FILE_PATH}"
+        headers = {
+            "Authorization": f"token {GITHUB_TOKEN}",
+            "Accept": "application/vnd.github.v3+json"
+        }
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, headers=headers) as resp:
+                sha = None
+                if resp.status == 200:
+                    data = await resp.json()
+                    sha = data.get("sha")
+            payload = {"message": "Auto-backup tiers.db", "content": content}
+            if sha:
+                payload["sha"] = sha
+            async with session.put(url, headers=headers, json=payload) as resp:
+                if resp.status not in (200, 201):
+                    print(f"GitHub backup failed: {resp.status}")
+    except Exception as e:
+        print(f"GitHub backup error: {e}")
 
 PANEL_CHANNEL_ID = 1517249587931250760
 TICKET_CATEGORY_ID = 1514689354281259170
@@ -79,6 +107,7 @@ def insert_tier_record(user_id: str, gamemode: str, tier: str, tester_id: str, n
             (user_id, gamemode, tier, tester_id, datetime.utcnow().isoformat(), notes)
         )
         conn.commit()
+    asyncio.create_task(backup_db_to_github())
 
 def get_cooldown_expiry(discord_id: str, gamemode: str):
     """Returns expiry datetime if user is on cooldown for gamemode, else None."""
@@ -1752,6 +1781,7 @@ async def main():
     await client.start(TOKEN)
 
 asyncio.run(main())
+
 
 
 
