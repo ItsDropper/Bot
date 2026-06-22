@@ -39,6 +39,31 @@ async def backup_db_to_github():
     except Exception as e:
         print(f"GitHub backup error: {e}")
 
+async def restore_db_from_github():
+    if os.path.exists(DB_PATH):
+        print("Database already exists, skipping restore.")
+        return
+    try:
+        import base64
+        import aiohttp
+        url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{GITHUB_FILE_PATH}"
+        headers = {
+            "Authorization": f"token {GITHUB_TOKEN}",
+            "Accept": "application/vnd.github.v3+json"
+        }
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, headers=headers) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    content = base64.b64decode(data["content"])
+                    with open(DB_PATH, "wb") as f:
+                        f.write(content)
+                    print("Database restored from GitHub!")
+                else:
+                    print(f"No backup found on GitHub: {resp.status}")
+    except Exception as e:
+        print(f"GitHub restore error: {e}")
+
 PANEL_CHANNEL_ID = 1517249587931250760
 TICKET_CATEGORY_ID = 1514689354281259170
 TESTER_ROLE_ID = 1514260245034041485
@@ -1765,6 +1790,7 @@ async def api_minecraft_player(request):
 
 
 async def main():
+    await restore_db_from_github()
     app = web.Application()
     app.router.add_get("/", health)
     app.router.add_get("/api", api_health)
