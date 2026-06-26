@@ -1715,34 +1715,35 @@ async def api_players_search(request):
             content_type="application/json"
         )
 
-    with get_db() as conn:
-        users = conn.execute(
-            "SELECT discord_id, username FROM users WHERE username LIKE ? LIMIT 20",
-            (f"%{q}%",)
-        ).fetchall()
+with get_db() as conn:
+    users = conn.execute(
+        "SELECT discord_id, mc_username FROM minecraft_links WHERE mc_username LIKE ? LIMIT 20",
+        (f"%{q}%",)
+    ).fetchall()
 
-        result = []
-        for u in users:
-            best = conn.execute(
-                """
-                SELECT th.tier, th.gamemode
-                FROM tier_history th
-                WHERE th.user_id = ?
-                  AND th.id = (
-                      SELECT id FROM tier_history
-                      WHERE user_id = th.user_id AND gamemode = th.gamemode
-                      ORDER BY timestamp DESC LIMIT 1
-                  )
-                ORDER BY th.tier DESC LIMIT 1
-                """,
-                (u["discord_id"],)
-            ).fetchone()
-            result.append({
-                "discord_id": u["discord_id"],
-                "username": u["username"],
-                "best_tier": best["tier"] if best else None,
-                "best_gamemode": best["gamemode"] if best else None,
-            })
+    result = []
+    for u in users:
+        best = conn.execute(
+            """
+            SELECT th.tier, th.gamemode
+            FROM tier_history th
+            WHERE th.user_id = ?
+              AND th.id = (
+                  SELECT id FROM tier_history
+                  WHERE user_id = th.user_id AND gamemode = th.gamemode
+                  ORDER BY timestamp DESC LIMIT 1
+              )
+            ORDER BY th.tier DESC LIMIT 1
+            """,
+            (u["discord_id"],)
+        ).fetchone()
+
+        result.append({
+            "discord_id": u["discord_id"],
+            "username": u["mc_username"],
+            "best_tier": best["tier"] if best else None,
+            "best_gamemode": best["gamemode"] if best else None,
+        })
 
     return web.Response(text=json.dumps(result), content_type="application/json")
 
