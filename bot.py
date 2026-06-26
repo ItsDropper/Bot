@@ -1747,7 +1747,7 @@ with get_db() as conn:
 
     result = []
     for u in users:
-    best = conn.execute(
+        best = conn.execute(
                 """
                 SELECT th.tier, th.gamemode
                 FROM tier_history th
