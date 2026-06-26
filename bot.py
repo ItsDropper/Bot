@@ -1710,7 +1710,7 @@ async def api_leaderboard_gamemode(request):
         if TIER_RANK.get(r["tier"], -1) >= 0
     ][:50]
     return web.Response(text=json.dumps(result), content_type="application/json")
-
+    
 async def api_players_search(request):
     import json
 
@@ -1726,28 +1726,29 @@ async def api_players_search(request):
             content_type="application/json"
         )
 
-with get_db() as conn:
-    print("DB:", DB_PATH)
+    with get_db() as conn:
+        print("DB:", DB_PATH)
 
-    rows = conn.execute(
-        "SELECT discord_id, mc_username FROM minecraft_links"
-    ).fetchall()
+        rows = conn.execute(
+            "SELECT discord_id, mc_username FROM minecraft_links"
+        ).fetchall()
 
-    print("LINKS:", [dict(r) for r in rows])
+        print("LINKS:", [dict(r) for r in rows])
 
-    users = conn.execute(
-        """
-        SELECT discord_id, mc_username
-        FROM minecraft_links
-        WHERE mc_username LIKE ?
-        LIMIT 20
-        """,
-        (f"%{q}%",)
-    ).fetchall()
+        users = conn.execute(
+            """
+            SELECT discord_id, mc_username
+            FROM minecraft_links
+            WHERE mc_username LIKE ?
+            LIMIT 20
+            """,
+            (f"%{q}%",)
+        ).fetchall()
 
-    result = []
-    for u in users:
-        best = conn.execute(
+        result = []
+
+        for u in users:
+            best = conn.execute(
                 """
                 SELECT th.tier, th.gamemode
                 FROM tier_history th
@@ -1761,15 +1762,18 @@ with get_db() as conn:
                 """,
                 (u["discord_id"],)
             ).fetchone()
+
             result.append({
                 "discord_id": u["discord_id"],
-                "username": u["username"],
+                "username": u["mc_username"],
                 "best_tier": best["tier"] if best else None,
                 "best_gamemode": best["gamemode"] if best else None,
             })
 
-    return web.Response(text=json.dumps(result), content_type="application/json")
-    
+    return web.Response(
+        text=json.dumps(result),
+        content_type="application/json"
+    )
 async def api_player_profile(request):
     import json
     username = request.match_info["username"]
