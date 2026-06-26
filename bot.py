@@ -74,8 +74,12 @@ intents = discord.Intents.default()
 # ── Database ──────────────────────────────────────────────────────────────────
 
 def get_db():
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
     conn.row_factory = sqlite3.Row
+    # WAL mode allows concurrent readers to always see the latest committed write,
+    # which fixes the API returning stale data after /tier is used.
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA synchronous=NORMAL")
     return conn
 
 def init_db():
@@ -132,7 +136,14 @@ def insert_tier_record(user_id: str, gamemode: str, tier: str, tester_id: str, n
             (user_id, gamemode, tier, tester_id, datetime.utcnow().isoformat(), notes)
         )
         conn.commit()
-    asyncio.create_task(backup_db_to_github())
+    # Safely schedule the async backup from this sync function by grabbing the
+    # running event loop. asyncio.create_task() alone can silently fail here.
+    try:
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            loop.create_task(backup_db_to_github())
+    except Exception as e:
+        print(f"Failed to schedule GitHub backup: {e}")
 
 def get_cooldown_expiry(discord_id: str, gamemode: str):
     """Returns expiry datetime if user is on cooldown for gamemode, else None."""
@@ -1717,12 +1728,11 @@ async def api_players_search(request):
 
     with get_db() as conn:
         users = conn.execute(
-            "SELECT discord_id, mc_username FROM minecraft_links WHERE mc_username LIKE ? LIMIT 20",
+            "SELECT discord_id, username FROM users WHERE username LIKE ? LIMIT 20",
             (f"%{q}%",)
         ).fetchall()
 
         result = []
-
         for u in users:
             best = conn.execute(
                 """
@@ -1734,21 +1744,19 @@ async def api_players_search(request):
                       WHERE user_id = th.user_id AND gamemode = th.gamemode
                       ORDER BY timestamp DESC LIMIT 1
                   )
+                ORDER BY th.tier DESC LIMIT 1
                 """,
                 (u["discord_id"],)
             ).fetchone()
-
             result.append({
                 "discord_id": u["discord_id"],
-                "username": u["mc_username"],
+                "username": u["username"],
                 "best_tier": best["tier"] if best else None,
                 "best_gamemode": best["gamemode"] if best else None,
             })
 
-    return web.Response(
-        text=json.dumps(result),
-        content_type="application/json"
-    )
+    return web.Response(text=json.dumps(result), content_type="application/json")
+
 async def api_player_profile(request):
     import json
     username = request.match_info["username"]
