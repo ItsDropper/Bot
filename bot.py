@@ -1727,7 +1727,7 @@ async def api_players_search(request):
         )
 
     with get_db() as conn:
-    print("DB:", DB_PATH)
+        print("DB:", DB_PATH)
 
     rows = conn.execute(
         "SELECT discord_id, mc_username FROM minecraft_links"
