@@ -1796,7 +1796,7 @@ async def api_player_profile(request):
         "history": [{"gamemode": r["gamemode"], "tier": r["tier"], "timestamp": r["timestamp"], "notes": r["notes"]} for r in history],
     }
     return web.Response(text=json.dumps(result), content_type="application/json") 
-            )
+            
 async def api_minecraft_player(request):
     import json
     mc_username = request.match_info["ign"]
