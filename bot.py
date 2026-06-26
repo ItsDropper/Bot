@@ -1756,61 +1756,34 @@ async def api_players_search(request):
             })
 
     return web.Response(text=json.dumps(result), content_type="application/json")
-
-async def api_players_search(request):
+    
+async def api_player_profile(request):
     import json
-
-    q = (
-        request.rel_url.query.get("q")
-        or request.rel_url.query.get("ign")
-        or ""
-    ).strip()
-
-    if not q:
-        return web.Response(
-            text=json.dumps([]),
-            content_type="application/json"
-        )
+    username = request.match_info["username"]
 
     with get_db() as conn:
-        users = conn.execute(
-            """
-            SELECT discord_id, mc_username
-            FROM minecraft_links
-            WHERE mc_username LIKE ?
-            LIMIT 20
-            """,
-            (f"%{q}%",)
+        user = conn.execute(
+            "SELECT discord_id, username FROM users WHERE username LIKE ? LIMIT 1",
+            (username,)
+        ).fetchone()
+
+        if not user:
+            return web.Response(status=404, text=json.dumps({"error": "Player not found"}), content_type="application/json")
+
+        tiers = _get_current_tiers(user["discord_id"], conn)
+        history = conn.execute(
+            "SELECT gamemode, tier, timestamp, notes FROM tier_history WHERE user_id = ? ORDER BY timestamp DESC LIMIT 20",
+            (user["discord_id"],)
         ).fetchall()
 
-        result = []
+    result = {
+        "discord_id": user["discord_id"],
+        "username": user["username"],
+        "tiers": [{"gamemode": r["gamemode"], "tier": r["tier"], "timestamp": r["timestamp"]} for r in tiers],
+        "history": [{"gamemode": r["gamemode"], "tier": r["tier"], "timestamp": r["timestamp"], "notes": r["notes"]} for r in history],
+    }
+    return web.Response(text=json.dumps(result), content_type="application/json")
 
-        for u in users:
-            best = conn.execute(
-                """
-                SELECT th.tier, th.gamemode
-                FROM tier_history th
-                WHERE th.user_id = ?
-                  AND th.id = (
-                      SELECT id
-                      FROM tier_history
-                      WHERE user_id = th.user_id
-                        AND gamemode = th.gamemode
-                      ORDER BY timestamp DESC
-                      LIMIT 1
-                  )
-                ORDER BY th.tier DESC
-                LIMIT 1
-                """,
-                (u["discord_id"],)
-            ).fetchone()
-
-            result.append({
-                "discord_id": u["discord_id"],
-                "username": u["mc_username"],
-                "best_tier": best["tier"] if best else None,
-                "best_gamemode": best["gamemode"] if best else None,
-            })
 
     return web.Response(
         text=json.dumps(result),
