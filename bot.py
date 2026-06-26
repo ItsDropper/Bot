@@ -1726,8 +1726,8 @@ async def api_players_search(request):
             content_type="application/json"
         )
 
-    with get_db() as conn:
-        print("DB:", DB_PATH)
+with get_db() as conn:
+    print("DB:", DB_PATH)
 
     rows = conn.execute(
         "SELECT discord_id, mc_username FROM minecraft_links"
@@ -1746,8 +1746,8 @@ async def api_players_search(request):
     ).fetchall()
 
     result = []
-        for u in users:
-            best = conn.execute(
+    for u in users:
+    best = conn.execute(
                 """
                 SELECT th.tier, th.gamemode
                 FROM tier_history th
