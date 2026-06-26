@@ -1753,15 +1753,11 @@ async def api_players_search(request):
                 SELECT th.tier, th.gamemode
                 FROM tier_history th
                 WHERE th.user_id = ?
-                  AND th.id = (
-                      SELECT id FROM tier_history
-                      WHERE user_id = th.user_id AND gamemode = th.gamemode
-                      ORDER BY timestamp DESC LIMIT 1
-                  )
-                ORDER BY th.tier DESC LIMIT 1
+                ORDER BY th.timestamp DESC
+                LIMIT 1
                 """,
                 (u["discord_id"],)
-            ).fetchone()
+                ).fetchone()
 
             result.append({
                 "discord_id": u["discord_id"],
@@ -1799,12 +1795,7 @@ async def api_player_profile(request):
         "tiers": [{"gamemode": r["gamemode"], "tier": r["tier"], "timestamp": r["timestamp"]} for r in tiers],
         "history": [{"gamemode": r["gamemode"], "tier": r["tier"], "timestamp": r["timestamp"], "notes": r["notes"]} for r in history],
     }
-    return web.Response(text=json.dumps(result), content_type="application/json")
-
-
-    return web.Response(
-        text=json.dumps(result),
-        content_type="application/json"
+    return web.Response(text=json.dumps(result), content_type="application/json") 
             )
 async def api_minecraft_player(request):
     import json
