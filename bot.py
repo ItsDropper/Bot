@@ -1702,7 +1702,8 @@ async def api_leaderboard_gamemode(request):
 
 async def api_players_search(request):
     import json
-    q = request.rel_url.query.get("q", "").strip()
+    q = request.rel_url.query.get("q") or request.rel_url.query.get("ign", "")
+q = q.strip()
     if not q:
         return web.Response(text="[]", content_type="application/json")
 
