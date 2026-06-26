@@ -1727,10 +1727,23 @@ async def api_players_search(request):
         )
 
     with get_db() as conn:
-        users = conn.execute(
-            "SELECT discord_id, username FROM users WHERE username LIKE ? LIMIT 20",
-            (f"%{q}%",)
-        ).fetchall()
+    print("DB:", DB_PATH)
+
+    rows = conn.execute(
+        "SELECT discord_id, mc_username FROM minecraft_links"
+    ).fetchall()
+
+    print("LINKS:", [dict(r) for r in rows])
+
+    users = conn.execute(
+        """
+        SELECT discord_id, mc_username
+        FROM minecraft_links
+        WHERE mc_username LIKE ?
+        LIMIT 20
+        """,
+        (f"%{q}%",)
+    ).fetchall()
 
         result = []
         for u in users:
