@@ -1745,7 +1745,7 @@ async def api_players_search(request):
         (f"%{q}%",)
     ).fetchall()
 
-        result = []
+    result = []
         for u in users:
             best = conn.execute(
                 """
