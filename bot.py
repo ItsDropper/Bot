@@ -1702,10 +1702,18 @@ async def api_leaderboard_gamemode(request):
 
 async def api_players_search(request):
     import json
-    q = request.rel_url.query.get("q") or request.rel_url.query.get("ign", "")
-q = q.strip()
+
+    q = (
+        request.rel_url.query.get("q")
+        or request.rel_url.query.get("ign")
+        or ""
+    ).strip()
+
     if not q:
-        return web.Response(text="[]", content_type="application/json")
+        return web.Response(
+            text=json.dumps([]),
+            content_type="application/json"
+        )
 
     with get_db() as conn:
         users = conn.execute(
