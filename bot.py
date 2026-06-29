@@ -1823,10 +1823,8 @@ async def api_minecraft_player(request):
 
 
 async def main():
-    if not 
-    os.path.exists(DB_PATH):
-        await 
-    restore_db_from_github()
+    if not os.path.exists(DB_PATH):
+    await restore_db_from_github()
     app = web.Application()
     app.router.add_get("/", health)
     app.router.add_get("/api", api_health)
