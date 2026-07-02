@@ -761,6 +761,8 @@ async def tier(
     ensure_user(str(user.id), user.name)
     ensure_user(str(interaction.user.id), interaction.user.name)
     insert_tier_record(str(user.id), gm, tr, str(interaction.user.id))
+    rows = fetch_user_history(str(user.id), 5)
+    print([dict(r) for r in rows])
 
     channel = interaction.guild.get_channel(RESULT_CHANNELS.get(gm))
     embed = discord.Embed(
