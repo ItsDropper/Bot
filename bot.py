@@ -273,12 +273,13 @@ class TicketModal(discord.ui.Modal, title="Tier Test Application"):
             interaction.user: discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True),
             guild.me: discord.PermissionOverwrite(view_channel=True, send_messages=True, manage_channels=True),
         }
+        
         if tester_role:
-    overwrites[tester_role] = discord.PermissionOverwrite(
-        view_channel=True,
-        send_messages=True,
-        read_message_history=True
-    )
+            overwrites[tester_role] = discord.PermissionOverwrite(
+                view_channel=True,
+                    send_messages=True,
+                read_message_history=True
+           )
 
 safe_name = interaction.user.name.lower().replace(" ", "-")[:20]
 safe_gamemode = self.gamemode.lower().replace(" ", "-")
