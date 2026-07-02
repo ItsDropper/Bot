@@ -138,7 +138,7 @@ def ensure_user(discord_id: str, username: str):
             " ON CONFLICT(discord_id) DO UPDATE SET username=excluded.username",
             (discord_id, username)
         )
-        conn.commit)
+        conn.commit()
 
 def insert_tier_record(user_id: str, gamemode: str, tier: str, tester_id: str, notes: str = None):
     print("insert_tier_record called")
