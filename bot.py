@@ -118,7 +118,7 @@ def init_db():
                 created_at TEXT NOT NULL
             )
         """)
-        conn.excecute("""
+        conn.execute("""
             CREATE TABLE IF NOT EXISTS sessions (
                 channel_id INTEGER PRIMARY KEY,
                 user_id TEXT NOT NULL,
