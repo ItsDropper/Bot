@@ -281,27 +281,27 @@ class TicketModal(discord.ui.Modal, title="Tier Test Application"):
                 read_message_history=True
            )
 
-safe_name = interaction.user.name.lower().replace(" ", "-")[:20]
-safe_gamemode = self.gamemode.lower().replace(" ", "-")
+        safe_name = interaction.user.name.lower().replace(" ", "-")[:20]
+        safe_gamemode = self.gamemode.lower().replace(" ", "-")
 
-channel = await guild.create_text_channel(
-    name=f"ticket-{safe_gamemode}-{safe_name}",
-    category=category,
-    overwrites=overwrites
-)
+        channel = await guild.create_text_channel(
+            name=f"ticket-{safe_gamemode}-{safe_name}",
+                category=category,
+                overwrites=overwrites
+            )
 
-import aiosqlite
+    import aiosqlite
 
-async with aiosqlite.connect("tiers.db") as db:
-    await db.execute(
-        "INSERT INTO sessions (channel_id, user_id, ign, gamemode, status) VALUES (?, ?, ?, ?, 'pending')",
-        (
-            channel.id,
-            interaction.user.id,
-            self.ign.value,
-            self.gamemode
-        )
-    )
+        async with aiosqlite.connect("tiers.db") as db:
+            await db.execute(
+                "INSERT INTO sessions (channel_id, user_id, ign, gamemode, status) VALUES (?, ?, ?, ?, 'pending')",
+                (
+                    channel.id,
+                    interaction.user.id,
+                    self.ign.value,
+                    self.gamemode
+                )
+            )
     await db.commit()
 
     
