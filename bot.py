@@ -1,5 +1,6 @@
 import os
 import asyncio
+import aiosqlite
 import sqlite3
 from datetime import datetime, timedelta
 import discord
@@ -290,7 +291,7 @@ class TicketModal(discord.ui.Modal, title="Tier Test Application"):
                 overwrites=overwrites
             )
 
-    import aiosqlite
+        
 
         async with aiosqlite.connect("tiers.db") as db:
             await db.execute(
