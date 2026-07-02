@@ -118,6 +118,15 @@ def init_db():
                 created_at TEXT NOT NULL
             )
         """)
+        conn.excecute("""
+            CREATE TABLE IF NOT EXISTS sessions (
+                channel_id INTEGER PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                ign TEXT NOT NULL,
+                gamemode TEXT NOT NULL,
+                status TEXT NOT NULL
+            )
+        """) 
         conn.commit()
 
 def ensure_user(discord_id: str, username: str):
