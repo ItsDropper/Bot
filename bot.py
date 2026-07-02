@@ -138,9 +138,11 @@ def ensure_user(discord_id: str, username: str):
             " ON CONFLICT(discord_id) DO UPDATE SET username=excluded.username",
             (discord_id, username)
         )
-        conn.commit()
+        conn.commit)
 
 def insert_tier_record(user_id: str, gamemode: str, tier: str, tester_id: str, notes: str = None):
+    print("insert_tier_record called")
+
     with get_db() as conn:
         conn.execute(
             "INSERT INTO tier_history (user_id, gamemode, tier, tester_id, timestamp, notes)"
@@ -148,12 +150,12 @@ def insert_tier_record(user_id: str, gamemode: str, tier: str, tester_id: str, n
             (user_id, gamemode, tier, tester_id, datetime.utcnow().isoformat(), notes)
         )
         conn.commit()
-    # Safely schedule the async backup from this sync function by grabbing the
-    # running event loop. asyncio.create_task() alone can silently fail here.
+
+    print("DB insert complete")
+
     try:
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
-            loop.create_task(backup_db_to_github())
+        print("Scheduling backup")
+        asyncio.create_task(backup_db_to_github())
     except Exception as e:
         print(f"Failed to schedule GitHub backup: {e}")
 
