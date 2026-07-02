@@ -274,16 +274,36 @@ class TicketModal(discord.ui.Modal, title="Tier Test Application"):
             guild.me: discord.PermissionOverwrite(view_channel=True, send_messages=True, manage_channels=True),
         }
         if tester_role:
-            overwrites[tester_role] = discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True)
+    overwrites[tester_role] = discord.PermissionOverwrite(
+        view_channel=True,
+        send_messages=True,
+        read_message_history=True
+    )
 
-        safe_name = interaction.user.name.lower().replace(" ", "-")[:20]
-        safe_gamemode = self.gamemode.lower().replace(" ", "-")
-        channel = await guild.create_text_channel(
-            name=f"ticket-{safe_gamemode}-{safe_name}",
-            category=category,
-            overwrites=overwrites
+safe_name = interaction.user.name.lower().replace(" ", "-")[:20]
+safe_gamemode = self.gamemode.lower().replace(" ", "-")
+
+channel = await guild.create_text_channel(
+    name=f"ticket-{safe_gamemode}-{safe_name}",
+    category=category,
+    overwrites=overwrites
+)
+
+import aiosqlite
+
+async with aiosqlite.connect("tiers.db") as db:
+    await db.execute(
+        "INSERT INTO sessions (channel_id, user_id, ign, gamemode, status) VALUES (?, ?, ?, ?, 'pending')",
+        (
+            channel.id,
+            interaction.user.id,
+            self.ign.value,
+            self.gamemode
         )
+    )
+    await db.commit()
 
+    
         embed = discord.Embed(title="Tier Test Ticket", color=discord.Color.green())
         embed.add_field(name="Discord", value=interaction.user.mention, inline=True)
         embed.add_field(name="Minecraft Username", value=self.ign.value, inline=True)
