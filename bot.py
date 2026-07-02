@@ -15,6 +15,7 @@ GITHUB_REPO = "Itsdropper/bot"
 GITHUB_FILE_PATH = "tiers.db"
 
 async def backup_db_to_github():
+    print("Starting GitHub backup...")
     try:
         import base64
         import aiohttp
@@ -37,6 +38,7 @@ async def backup_db_to_github():
             async with session.put(url, headers=headers, json=payload) as resp:
                 if resp.status not in (200, 201):
                     print(f"GitHub backup failed: {resp.status}")
+                    print(await resp.text()) 
     except Exception as e:
         print(f"GitHub backup error: {e}")
 
