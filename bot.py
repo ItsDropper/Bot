@@ -1847,6 +1847,17 @@ async def api_minecraft_player(request):
 async def main():
     if not os.path.exists(DB_PATH):
         await restore_db_from_github()
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("""
+        CREATE TABLE IF NOT EXISTS sessions (
+            channel_id INTEGER PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            ign TEXT NOT NULL,
+            gamemode TEXT NOT NULL,
+            status TEXT NOT NULL
+        )
+        """)
+        await db.commit()
     app = web.Application()
     app.router.add_get("/", health)
     app.router.add_get("/api", api_health)
