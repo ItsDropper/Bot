@@ -302,7 +302,7 @@ class TicketModal(discord.ui.Modal, title="Tier Test Application"):
                     self.gamemode
                 )
             )
-    await db.commit()
+            await db.commit()
 
     
         embed = discord.Embed(title="Tier Test Ticket", color=discord.Color.green())
