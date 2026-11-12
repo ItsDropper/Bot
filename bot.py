@@ -7,7 +7,6 @@ import discord
 from discord import app_commands
 from aiohttp import web
 
-TOKEN = os.environ["DISCORD_BOT_TOKEN"]
 PORT = int(os.environ.get("PORT", 3001))
 
 PANEL_CHANNEL_ID = 1517249587931250760
@@ -2276,9 +2275,13 @@ async def main():
     site = web.TCPSite(runner, "0.0.0.0", PORT, reuse_port=True)
     await site.start()
     print(f"Health check running on port {PORT}")
-    await client.start(TOKEN)
+    token = os.environ.get("DISCORD_BOT_TOKEN")
+    if not token:
+        raise RuntimeError("DISCORD_BOT_TOKEN environment variable is required")
+    await client.start(token)
 
-asyncio.run(main())
+if __name__ == "__main__":
+    asyncio.run(main())
 
 
 
