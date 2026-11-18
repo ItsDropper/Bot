@@ -883,7 +883,7 @@ class Client(discord.Client):
                         waiting_for_staff = not staff_at or bool(customer_at and customer_at > staff_at)
                         if not waiting_for_staff or ticket.get("last_escalated_at"):
                             continue
-                        baseline = customer_at or ticket.get("created_at")
+                        baseline = customer_at or ticket.get("automation_started_at") or ticket.get("created_at")
                         try:
                             waiting_since = datetime.fromisoformat(baseline.replace("Z", "+00:00"))
                             if waiting_since.tzinfo is not None:
@@ -916,6 +916,8 @@ class Client(discord.Client):
         await self.wait_until_ready()
     async def on_member_join(self, member: discord.Member):
         """Post an automatic welcome panel; do not send unsolicited DMs."""
+        if member.bot:
+            return
         guild = member.guild
         candidates = [guild.system_channel] + [c for c in guild.text_channels if c.name.casefold() in {"welcome", "start-here", "introductions"}]
         channel = next((c for c in candidates if isinstance(c, discord.TextChannel) and c.permissions_for(guild.me).send_messages and c.permissions_for(guild.me).embed_links), None)
@@ -937,7 +939,7 @@ class Client(discord.Client):
 
     async def on_message(self, message: discord.Message):
         """Record ticket message metadata only; message contents are never stored."""
-        if message.guild is None or message.author.bot:
+        if message.guild is None or message.author.bot or message.webhook_id:
             return
         channel = message.channel
         if not isinstance(channel, discord.TextChannel) or not channel.name.startswith("support-") or not re.fullmatch(r"vanta_ticket_owner:[0-9]{15,22}", channel.topic or ""):
