@@ -49,6 +49,7 @@ The intake is persisted with the support ticket and displayed in its opening emb
 | `/ticketqueue` | Configured support staff or administrator | View open tickets ordered by priority, then age |
 | `/ticketnote` | Configured support staff or administrator | Store a private internal note in D1; never posts the note in the public ticket channel |
 | `/ticketpriority` | Configured support staff or administrator | Set low, normal, high or urgent priority and record the change atomically |
+| `/ticketassign` | Configured support staff or administrator | Assign an open ticket to a member of the configured support team and record the assignment in ticket activity |
 | `/ticketactivity` | Configured support staff or administrator | View staff notes and priority changes |
 
 Ticket notes and priority changes are stored in `support_ticket_activity`; corresponding audit events are also appended to `audit_events`.
