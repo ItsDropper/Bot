@@ -274,11 +274,10 @@ async function handle(request, env) {
         typeof body?.escalated_at !== "string" || !Number.isFinite(Date.parse(body.escalated_at))) {
       return json({ error: "Invalid ticket escalation metadata" }, 400);
     }
-    const result = await env.DB.prepare(
-      "UPDATE support_tickets SET last_escalated_at = ? WHERE guild_id = ? AND channel_id = ? AND status = 'open' AND last_escalated_at IS NULL"
-    ).bind(body.escalated_at, body.guild_id, ticketEscalationMatch[1]).run();
-    if (!result.meta?.changes) return json({ error: "Ticket not found or already escalated" }, 409);
-    const ticket = await env.DB.prepare("SELECT * FROM support_tickets WHERE guild_id = ? AND channel_id = ?").bind(body.guild_id, ticketEscalationMatch[1]).first();
+    const ticket = await env.DB.prepare(
+      "UPDATE support_tickets SET last_escalated_at = ? WHERE guild_id = ? AND channel_id = ? AND status = 'open' AND last_escalated_at IS NULL RETURNING *"
+    ).bind(body.escalated_at, body.guild_id, ticketEscalationMatch[1]).first();
+    if (!ticket) return json({ error: "Ticket not found or already escalated" }, 409);
     return json({ ticket });
   }
   const ticketNoteMatch = path.match(/^\/v1\/tickets\/channel\/([0-9]{15,22})\/notes$/);
