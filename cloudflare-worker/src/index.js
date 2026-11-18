@@ -107,7 +107,7 @@ async function handle(request, env) {
     return json({ config: saved });
   }
 
-  const releaseMatch = path.match(/^\\/v1\\/releases\\/([0-9]{15,22})\\/([a-z][a-z0-9_-]{0,31})\\/([A-Za-z0-9][A-Za-z0-9._+-]{0,79})$/);
+  const releaseMatch = path.match(/^\/v1\/releases\/([0-9]{15,22})\\/([a-z][a-z0-9_-]{0,31})\\/([A-Za-z0-9][A-Za-z0-9._+-]{0,79})$/);
   if (releaseMatch && request.method === "GET") {
     const announcement = await env.DB.prepare(
       "SELECT guild_id, project, release_tag, channel_id, message_id, announced_at FROM release_announcements WHERE guild_id = ? AND project = ? AND release_tag = ?"
