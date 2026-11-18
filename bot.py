@@ -12,6 +12,7 @@ from config.settings import Settings
 from core.database import CloudflareDatabase, DatabaseError, MinecraftLinkConflict
 from core.audit import AuditService
 from core.permissions import PermissionService
+from core.support import build_technical_report
 from cogs.moderation import register_moderation_commands
 from cogs.tickets import register_ticket_commands
 
@@ -130,6 +131,112 @@ class CloseSupportTicketView(discord.ui.View):
 
 # ── Support ticket system ─────────────────────────────────────────────────────
 
+async def _create_support_ticket(
+    interaction: discord.Interaction,
+    topic: str,
+    details: str,
+    *,
+    persisted_details: str | None = None,
+    technical_fields: list[tuple[str, str]] | None = None,
+):
+    guild = interaction.guild
+    config = await database.get_guild_config(str(guild.id)) or {}
+    category_id = int(config.get("support_category_id") or TICKET_CATEGORY_ID)
+    support_role_id = int(config.get("support_role_id") or SUPPORT_ROLE_ID)
+    category = guild.get_channel(category_id)
+
+    # D1 is the source of truth for duplicate prevention; this channel check
+    # also catches legacy tickets created before the persistent ticket ledger.
+    if category:
+        for ch in category.channels:
+            if ch.name.startswith("support-"):
+                overwrites_for_user = ch.overwrites_for(interaction.user)
+                if overwrites_for_user.view_channel is True:
+                    await interaction.response.send_message(
+                        f"You already have an open support ticket: {ch.mention}", ephemeral=True
+                    )
+                    return
+
+    support_role = guild.get_role(support_role_id)
+    overwrites = {
+        guild.default_role: discord.PermissionOverwrite(view_channel=False),
+        interaction.user: discord.PermissionOverwrite(
+            view_channel=True, send_messages=True, read_message_history=True
+        ),
+        guild.me: discord.PermissionOverwrite(
+            view_channel=True, send_messages=True, manage_channels=True
+        ),
+    }
+    if support_role:
+        overwrites[support_role] = discord.PermissionOverwrite(
+            view_channel=True, send_messages=True, read_message_history=True
+        )
+
+    safe_name = re.sub(r"[^a-z0-9-]", "", interaction.user.name.lower().replace(" ", "-"))[:20] or "member"
+    await interaction.response.defer(ephemeral=True)
+    channel = await guild.create_text_channel(
+        name=f"support-{safe_name}",
+        category=category,
+        overwrites=overwrites,
+        topic=f"vanta_ticket_owner:{interaction.user.id}"
+    )
+    ticket_reason = f"[{topic}] {persisted_details if persisted_details is not None else details}"
+    try:
+        await database.create_support_ticket(
+            ticket_id=f"{guild.id}:{channel.id}",
+            guild_id=str(guild.id),
+            channel_id=str(channel.id),
+            owner_id=str(interaction.user.id),
+            reason=ticket_reason,
+            created_at=datetime.utcnow().isoformat(),
+        )
+    except DatabaseError as exc:
+        await channel.delete(reason="Ticket database registration failed")
+        await interaction.followup.send(
+            f"Ticket could not be registered. No ticket was left open. {exc}", ephemeral=True
+        )
+        return
+
+    embed = discord.Embed(
+        title=f"{VANTA_EMOJI_MARKUP}  NEW SUPPORT REQUEST",
+        description="A private support conversation has been opened.",
+        color=0x3978F6,
+    )
+    embed.add_field(name="REQUESTER", value=interaction.user.mention, inline=True)
+    embed.add_field(name="TOPIC", value=topic, inline=True)
+    embed.add_field(
+        name="DETAILS",
+        value=discord.utils.escape_mentions(discord.utils.escape_markdown(details)),
+        inline=False,
+    )
+    for field_name, field_value in technical_fields or []:
+        embed.add_field(
+            name=field_name.upper(),
+            value=discord.utils.escape_mentions(discord.utils.escape_markdown(field_value)),
+            inline=False,
+        )
+    embed.set_thumbnail(url=interaction.user.display_avatar.url)
+    embed.set_footer(text="VANTA SUPPORT  •  Keep all updates in this channel")
+    embed.timestamp = datetime.utcnow()
+
+    ping = support_role.mention if support_role else None
+    await channel.send(
+        content=ping,
+        embed=embed,
+        view=CloseSupportTicketView(),
+        allowed_mentions=discord.AllowedMentions(roles=[support_role] if support_role else [], users=False),
+    )
+    await record_audit(
+        guild.id, interaction.user.id, "ticket.created",
+        target_id=channel.id,
+        details={"owner_id": str(interaction.user.id), "topic": topic,
+                 "technical_intake": bool(technical_fields)},
+    )
+    await interaction.followup.send(
+        f"Your support ticket is ready: {channel.mention}", ephemeral=True
+    )
+
+
 class SupportTicketModal(discord.ui.Modal, title="Create Support Ticket"):
     reason = discord.ui.TextInput(
         label="Describe what you need help with",
@@ -144,89 +251,64 @@ class SupportTicketModal(discord.ui.Modal, title="Create Support Ticket"):
         self.topic = topic
 
     async def on_submit(self, interaction: discord.Interaction):
-        guild = interaction.guild
-        config = await database.get_guild_config(str(guild.id)) or {}
-        category_id = int(config.get("support_category_id") or TICKET_CATEGORY_ID)
-        support_role_id = int(config.get("support_role_id") or SUPPORT_ROLE_ID)
-        category = guild.get_channel(category_id)
+        await _create_support_ticket(interaction, self.topic, self.reason.value)
 
-        # D1 is the source of truth for duplicate prevention; the channel check
-        # also catches legacy tickets created before the persistent ticket ledger.
-        if category:
-            for ch in category.channels:
-                if ch.name.startswith("support-"):
-                    ow = ch.overwrites_for(interaction.user)
-                    if ow.view_channel is True:
-                        await interaction.response.send_message(
-                            f"You already have an open support ticket: {ch.mention}", ephemeral=True
-                        )
-                        return
 
-        support_role = guild.get_role(support_role_id)
-        overwrites = {
-            guild.default_role: discord.PermissionOverwrite(view_channel=False),
-            interaction.user: discord.PermissionOverwrite(
-                view_channel=True, send_messages=True, read_message_history=True
-            ),
-            guild.me: discord.PermissionOverwrite(
-                view_channel=True, send_messages=True, manage_channels=True
-            ),
-        }
-        if support_role:
-            overwrites[support_role] = discord.PermissionOverwrite(
-                view_channel=True, send_messages=True, read_message_history=True
-            )
+class TechnicalSupportTicketModal(discord.ui.Modal, title="Vanta / Modding Support"):
+    minecraft_version = discord.ui.TextInput(
+        label="Minecraft version (if applicable)",
+        placeholder="e.g. 1.21.11 — leave blank if unknown",
+        required=False,
+        max_length=32,
+    )
+    loader = discord.ui.TextInput(
+        label="Loader + version",
+        placeholder="e.g. Fabric 0.x, NeoForge, Quilt, Rift...",
+        required=False,
+        max_length=80,
+    )
+    launcher_version = discord.ui.TextInput(
+        label="Vanta Launcher version",
+        placeholder="Version shown in the launcher",
+        required=False,
+        max_length=40,
+    )
+    summary = discord.ui.TextInput(
+        label="What happened?",
+        style=discord.TextStyle.paragraph,
+        placeholder="Steps to reproduce, expected vs actual result, modpack and relevant mods...",
+        min_length=10,
+        max_length=300,
+    )
+    log_url = discord.ui.TextInput(
+        label="Log / crash report URL (optional)",
+        placeholder="Paste a share link; remove tokens or private information first",
+        required=False,
+        max_length=300,
+    )
 
-        safe_name = re.sub(r"[^a-z0-9-]", "", interaction.user.name.lower().replace(" ", "-"))[:20] or "member"
-        await interaction.response.defer(ephemeral=True)
-        channel = await guild.create_text_channel(
-            name=f"support-{safe_name}",
-            category=category,
-            overwrites=overwrites,
-            topic=f"vanta_ticket_owner:{interaction.user.id}"
-        )
-        ticket_reason = f"[{self.topic}] {self.reason.value}"
+    def __init__(self, topic: str):
+        super().__init__()
+        self.topic = topic
+
+    async def on_submit(self, interaction: discord.Interaction):
         try:
-            await database.create_support_ticket(
-                ticket_id=f"{guild.id}:{channel.id}",
-                guild_id=str(guild.id),
-                channel_id=str(channel.id),
-                owner_id=str(interaction.user.id),
-                reason=ticket_reason,
-                created_at=datetime.utcnow().isoformat(),
+            persisted, fields = build_technical_report(
+                minecraft_version=self.minecraft_version.value,
+                loader=self.loader.value,
+                launcher_version=self.launcher_version.value,
+                summary=self.summary.value,
+                log_url=self.log_url.value,
             )
-        except DatabaseError as exc:
-            await channel.delete(reason="Ticket database registration failed")
-            await interaction.followup.send(
-                f"Ticket could not be registered. No ticket was left open. {exc}", ephemeral=True
-            )
+        except ValueError as exc:
+            await interaction.response.send_message(str(exc), ephemeral=True)
             return
-
-        embed = discord.Embed(
-            title=f"{VANTA_EMOJI_MARKUP}  NEW SUPPORT REQUEST",
-            description="A private support conversation has been opened.",
-            color=0x3978F6,
-        )
-        embed.add_field(name="REQUESTER", value=interaction.user.mention, inline=True)
-        embed.add_field(name="TOPIC", value=self.topic, inline=True)
-        embed.add_field(name="DETAILS", value=discord.utils.escape_mentions(self.reason.value), inline=False)
-        embed.set_thumbnail(url=interaction.user.display_avatar.url)
-        embed.set_footer(text="VANTA SUPPORT  •  Keep all updates in this channel")
-        embed.timestamp = datetime.utcnow()
-
-        ping = support_role.mention if support_role else None
-        await channel.send(
-            content=ping,
-            embed=embed,
-            view=CloseSupportTicketView(),
-            allowed_mentions=discord.AllowedMentions(roles=[support_role] if support_role else [], users=False),
-        )
-        await record_audit(
-            guild.id, interaction.user.id, "ticket.created",
-            target_id=channel.id, details={"owner_id": str(interaction.user.id), "topic": self.topic},
-        )
-        await interaction.followup.send(
-            f"Your support ticket is ready: {channel.mention}", ephemeral=True
+        await _create_support_ticket(
+            interaction,
+            self.topic,
+            self.summary.value.strip(),
+            persisted_details=persisted,
+            technical_fields=fields,
         )
 
 
@@ -269,7 +351,11 @@ class SupportPanelView(discord.ui.View):
     )
     async def open_support_ticket(self, interaction: discord.Interaction, button: discord.ui.Button):
         topic = self.selected_topics.pop((interaction.guild_id, interaction.user.id), "General support")
-        await interaction.response.send_modal(SupportTicketModal(topic))
+        technical_topics = {"Launcher & installation", "Mods & compatibility", "Bug report"}
+        if topic in technical_topics:
+            await interaction.response.send_modal(TechnicalSupportTicketModal(topic))
+        else:
+            await interaction.response.send_modal(SupportTicketModal(topic))
 
     @discord.ui.button(
         label="My open tickets",
@@ -339,7 +425,7 @@ class SupportPanelView(discord.ui.View):
         )
         embed.add_field(
             name="HELPFUL DETAILS",
-            value="Include your launcher version, Minecraft version, loader and relevant error text when reporting a technical issue.",
+            value="For launcher, mod and bug reports, the form collects Minecraft version, loader, launcher version, reproduction details and an optional log link. Remove access tokens and private information before sharing logs.",
             inline=False,
         )
         embed.set_footer(text="VANTA SUPPORT  •  One issue per ticket")
