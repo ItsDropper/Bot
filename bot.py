@@ -96,13 +96,14 @@ class CloseSupportTicketView(discord.ui.View):
             )
             return
         await interaction.response.defer(ephemeral=True)
-        try:
-            await database.close_support_ticket(
-                str(interaction.channel.id), str(interaction.user.id), datetime.utcnow().isoformat()
-            )
-        except DatabaseError as exc:
-            await interaction.followup.send(f"Could not close ticket safely: {exc}", ephemeral=True)
-            return
+        if interaction.channel.name.startswith("support-"):
+            try:
+                await database.close_support_ticket(
+                    str(interaction.channel.id), str(interaction.user.id), datetime.utcnow().isoformat()
+                )
+            except DatabaseError as exc:
+                await interaction.followup.send(f"Could not close ticket safely: {exc}", ephemeral=True)
+                return
         if TICKET_LOG_CHANNEL_ID:
             log_channel = interaction.guild.get_channel(TICKET_LOG_CHANNEL_ID)
             if log_channel:
