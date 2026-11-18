@@ -320,11 +320,17 @@ class CloudflareDatabase:
         })
         return result["announcement"]
 
-    async def assign_support_ticket(self, channel_id: str, assigned_to: str,
-                                    assigned_by: str, assigned_at: str):
+    async def assign_support_ticket(self, *, guild_id: str, channel_id: str,
+                                    assigned_to: str, assigned_by: str, assigned_at: str):
+        identifiers = (guild_id, channel_id, assigned_to, assigned_by)
+        if any(not re.fullmatch(r"[0-9]{15,22}", str(value)) for value in identifiers):
+            raise ValueError("Invalid ticket assignment identifiers")
+        if not isinstance(assigned_at, str) or not assigned_at or len(assigned_at) > 40:
+            raise ValueError("Invalid ticket assignment timestamp")
         result = await self._request(
             "PATCH", f"/v1/tickets/channel/{quote(str(channel_id), safe='')}/assign",
             payload={
+                "guild_id": str(guild_id),
                 "assigned_to": str(assigned_to),
                 "assigned_by": str(assigned_by),
                 "assigned_at": assigned_at,
