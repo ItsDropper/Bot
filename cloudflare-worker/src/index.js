@@ -243,6 +243,71 @@ async function handle(request, env) {
     return json({ ticket });
   }
 
+  if (path === "/v1/moderation/cases" && request.method === "POST") {
+    let body;
+    try { body = await readJson(request); } catch { return json({ error: "Invalid JSON request body" }, 400); }
+    const validId = value => typeof value === "string" && /^[0-9]{15,22}$/.test(value);
+    const actions = ["warn", "timeout", "kick", "ban", "unban"];
+    if (!validId(body?.guild_id) || !validId(body?.target_id) || !validId(body?.moderator_id) ||
+        !actions.includes(body?.action) || typeof body?.reason !== "string" ||
+        !body.reason.trim() || body.reason.length > 512 ||
+        typeof body?.created_at !== "string" || !Number.isFinite(Date.parse(body.created_at)) ||
+        (body.expires_at != null && (typeof body.expires_at !== "string" || !Number.isFinite(Date.parse(body.expires_at))))) {
+      return json({ error: "Invalid moderation case" }, 400);
+    }
+    const result = await env.DB.prepare(
+      "INSERT INTO moderation_cases (guild_id, target_id, moderator_id, action, reason, status, created_at, expires_at) VALUES (?, ?, ?, ?, ?, 'pending', ?, ?)"
+    ).bind(body.guild_id, body.target_id, body.moderator_id, body.action, body.reason.trim(), body.created_at, body.expires_at || null).run();
+    const caseRow = await env.DB.prepare("SELECT * FROM moderation_cases WHERE case_id = ?")
+      .bind(result.meta?.last_row_id).first();
+    return json({ case: caseRow }, 201);
+  }
+
+  const moderationCaseMatch = path.match(/^\\/v1\\/moderation\\/cases\\/([0-9]{1,12})$/);
+  if (moderationCaseMatch && request.method === "PATCH") {
+    let body;
+    try { body = await readJson(request); } catch { return json({ error: "Invalid JSON request body" }, 400); }
+    if (!["applied", "failed"].includes(body?.status) ||
+        typeof body?.completed_at !== "string" || !Number.isFinite(Date.parse(body.completed_at)) ||
+        (body.failure_reason != null && (typeof body.failure_reason !== "string" || body.failure_reason.length > 500))) {
+      return json({ error: "Invalid moderation case completion" }, 400);
+    }
+    const caseId = Number(moderationCaseMatch[1]);
+    const existing = await env.DB.prepare("SELECT * FROM moderation_cases WHERE case_id = ?").bind(caseId).first();
+    if (!existing) return json({ error: "Moderation case not found" }, 404);
+    if (existing.status !== "pending") return json({ error: "Moderation case is already finalized" }, 409);
+    await env.DB.prepare(
+      "UPDATE moderation_cases SET status = ?, completed_at = ?, failure_reason = ? WHERE case_id = ? AND status = 'pending'"
+    ).bind(body.status, body.completed_at, body.failure_reason || null, caseId).run();
+    const caseRow = await env.DB.prepare("SELECT * FROM moderation_cases WHERE case_id = ?").bind(caseId).first();
+    return json({ case: caseRow });
+  }
+
+  if (path === "/v1/moderation/cases" && request.method === "GET") {
+    const url = new URL(request.url);
+    const guildId = url.searchParams.get("guild_id") || "";
+    const targetId = url.searchParams.get("target_id") || "";
+    const limit = Number(url.searchParams.get("limit") || 10);
+    const offset = Number(url.searchParams.get("offset") || 0);
+    const validId = value => /^[0-9]{15,22}$/.test(value);
+    if (!validId(guildId) || (targetId && !validId(targetId)) ||
+        !Number.isInteger(limit) || limit < 1 || limit > 25 ||
+        !Number.isInteger(offset) || offset < 0 || offset > 1000000) {
+      return json({ error: "Invalid moderation case query" }, 400);
+    }
+    const clauses = ["guild_id = ?"];
+    const values = [guildId];
+    if (targetId) { clauses.push("target_id = ?"); values.push(targetId); }
+    const where = clauses.join(" AND ");
+    const [rows, count] = await Promise.all([
+      env.DB.prepare("SELECT * FROM moderation_cases WHERE " + where + " ORDER BY case_id DESC LIMIT ? OFFSET ?")
+        .bind(...values, limit, offset).all(),
+      env.DB.prepare("SELECT COUNT(*) AS total FROM moderation_cases WHERE " + where)
+        .bind(...values).first(),
+    ]);
+    return json({ cases: rows.results || [], total: count.total || 0 });
+  }
+
   const discordMatch = path.match(/^\/v1\/minecraft-links\/discord\/([0-9]{15,22})$/);
   if (discordMatch) {
     const discordId = discordMatch[1];
