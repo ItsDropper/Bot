@@ -709,7 +709,7 @@ async def sendsupportpanel(interaction: discord.Interaction, channel: discord.Te
         ),
         color=0x2B2D31
     )
-    embed.set_image(url="https://i.imgur.com/MV0Xqr5.png")
+
     embed.set_footer(text="Open a ticket to get started")
 
     await channel.send(embed=embed, view=SupportPanelView())
