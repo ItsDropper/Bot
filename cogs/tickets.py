@@ -78,6 +78,48 @@ def register_ticket_commands(tree, database_provider, support_only, audit_record
             ephemeral=True,
         )
 
+    @tree.command(name="ticketqueue", description="View the prioritized open support ticket queue")
+    @app_commands.checks.guild_only()
+    @support_only()
+    async def ticketqueue(interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+        try:
+            tickets, total = await database().list_support_tickets(
+                str(interaction.guild.id), status="open", limit=25,
+            )
+        except DatabaseError as exc:
+            await interaction.followup.send(f"Could not load the support queue: {exc}", ephemeral=True)
+            return
+        priority_rank = {"urgent": 0, "high": 1, "normal": 2, "low": 3}
+        tickets.sort(key=lambda row: (
+            priority_rank.get(row.get("priority", "normal"), 2),
+            row.get("created_at", ""),
+        ))
+        embed = discord.Embed(
+            title="VANTA  /  SUPPORT QUEUE",
+            description="Open tickets ordered by priority, then age.",
+            color=0x3978F6,
+        )
+        if not tickets:
+            embed.add_field(name="Queue clear", value="There are no open support tickets.")
+        else:
+            lines = []
+            for ticket in tickets[:15]:
+                channel = interaction.guild.get_channel(int(ticket["channel_id"]))
+                channel_label = channel.mention if channel else f"`{ticket['channel_id']}`"
+                priority = str(ticket.get("priority") or "normal").upper()
+                assigned = f"<@{ticket['assigned_to']}>" if ticket.get("assigned_to") else "Unassigned"
+                created = int(datetime.fromisoformat(ticket["created_at"].replace("Z", "+00:00")).timestamp())
+                reason = discord.utils.escape_markdown(ticket["reason"])[:100]
+                lines.append(
+                    f"**{priority}** · {channel_label} · <@{ticket['owner_id']}>\n"
+                    f"{assigned} · opened <t:{created}:R>\n"
+                    f"{reason}"
+                )
+            embed.description = "\n\n".join(lines)
+        embed.set_footer(text=f"{total} open ticket(s) · Showing up to 15 · Priority-first ordering")
+        await interaction.followup.send(embed=embed, ephemeral=True)
+
     @tree.command(name="ticketactivity", description="View staff notes and priority history for a support ticket")
     @app_commands.describe(channel="Support ticket to inspect")
     @app_commands.guild_only()
