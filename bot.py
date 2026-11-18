@@ -5,6 +5,7 @@ import aiohttp
 from datetime import datetime
 import discord
 from discord import app_commands
+from discord.ext import tasks
 from aiohttp import web
 
 from core.database import CloudflareDatabase, DatabaseError, MinecraftLinkConflict
@@ -470,6 +471,89 @@ class LegacyTierPanelView(discord.ui.View):
 
 # ── Bot setup ─────────────────────────────────────────────────────────────────
 
+async def announce_latest_launcher_release(guild: discord.Guild) -> str:
+    channel = guild.get_channel(LAUNCHER_ANNOUNCEMENT_CHANNEL_ID)
+    if channel is None:
+        try:
+            channel = await guild.fetch_channel(LAUNCHER_ANNOUNCEMENT_CHANNEL_ID)
+        except (discord.NotFound, discord.Forbidden):
+            return "announcement channel unavailable"
+    if not isinstance(channel, discord.TextChannel):
+        return "announcement destination is not a text channel"
+
+    role = guild.get_role(LAUNCHER_ANNOUNCEMENT_ROLE_ID)
+    if role is None:
+        return "announcement role not found"
+
+    bot_member = guild.me
+    if bot_member is None:
+        return "bot member is unavailable"
+    permissions = channel.permissions_for(bot_member)
+    if not all((permissions.view_channel, permissions.read_message_history,
+                permissions.send_messages, permissions.embed_links)):
+        return "missing channel permissions"
+    if not role.mentionable and not permissions.mention_everyone:
+        return "missing role mention permission"
+
+    try:
+        timeout = aiohttp.ClientTimeout(total=10)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.get(
+                "https://api.github.com/repos/ItsDropper/Vanta/releases/latest",
+                headers={"Accept": "application/vnd.github+json", "User-Agent": "Vanta-Discord-Bot"},
+            ) as response:
+                if response.status != 200:
+                    return f"GitHub release lookup returned HTTP {response.status}"
+                release = await response.json()
+        if not isinstance(release, dict):
+            return "GitHub returned invalid release metadata"
+        tag = release.get("tag_name")
+        release_url = release.get("html_url")
+        if (not isinstance(tag, str) or not tag or not isinstance(release_url, str)
+                or not release_url.startswith("https://github.com/ItsDropper/Vanta/releases/")):
+            return "GitHub returned invalid release metadata"
+    except (aiohttp.ClientError, asyncio.TimeoutError, ValueError) as exc:
+        print(f"Could not fetch the latest Vanta release: {exc}")
+        return "GitHub release lookup failed"
+
+    title = f"Vanta Launcher Update — {tag}"
+    async for previous in channel.history(limit=100):
+        if previous.author.id == client.user.id and any(
+            embed.title == title for embed in previous.embeds
+        ):
+            return f"{tag} already announced"
+
+    notes = release.get("body") or "See the GitHub release page for the full changelog."
+    notes = notes.strip()
+    if len(notes) > 3000:
+        notes = notes[:2997].rstrip() + "..."
+    embed = discord.Embed(
+        title=title,
+        description=f"{notes}\\n\\n[Download Vanta Launcher and view release details]({release_url})",
+        url=release_url,
+        color=0x3978F6,
+    )
+    embed.set_footer(text="Vanta Launcher • Official Release")
+    published_at = release.get("published_at")
+    if published_at:
+        try:
+            embed.timestamp = datetime.fromisoformat(published_at.replace("Z", "+00:00"))
+        except ValueError:
+            pass
+
+    try:
+        message = await channel.send(
+            content=role.mention,
+            embed=embed,
+            allowed_mentions=discord.AllowedMentions(
+                roles=[role], users=False, everyone=False, replied_user=False
+            ),
+        )
+    except discord.Forbidden:
+        return "Discord rejected the announcement"
+    return f"announced {tag} as message {message.id}"
+
+
 class Client(discord.Client):
     async def setup_hook(self):
         self.add_view(CloseSupportTicketView())
@@ -478,12 +562,29 @@ class Client(discord.Client):
         self.add_view(LegacyTesterApplicationView())
         self.add_view(LegacyTierPanelView())
         self.add_view(ApplicationResultView())
+        self.launcher_release_announcer.start()
+
+    @tasks.loop(hours=1)
+    async def launcher_release_announcer(self):
+        for guild in self.guilds:
+            try:
+                result = await announce_latest_launcher_release(guild)
+                print(f"Launcher release monitor ({guild.id}): {result}")
+            except Exception:
+                import traceback
+                traceback.print_exc()
+
+    @launcher_release_announcer.before_loop
+    async def before_launcher_release_announcer(self):
+        await self.wait_until_ready()
 
     async def on_ready(self):
         for guild in self.guilds:
             tree.copy_global_to(guild=guild)
             await tree.sync(guild=guild)
             await reconcile_ticket_close_controls(guild)
+            result = await announce_latest_launcher_release(guild)
+            print(f"Initial launcher release check ({guild.id}): {result}")
         print(f"Logged in as {self.user} (ID: {self.user.id})")
         print(f"Commands synced to {len(self.guilds)} guild(s).")
 
@@ -591,108 +692,9 @@ async def announce_launcher_update(interaction: discord.Interaction):
     if not interaction.user.guild_permissions.administrator:
         await interaction.response.send_message("You need Administrator permission to use this.", ephemeral=True)
         return
-
     await interaction.response.defer(ephemeral=True)
-    channel = interaction.guild.get_channel(LAUNCHER_ANNOUNCEMENT_CHANNEL_ID)
-    if channel is None:
-        try:
-            channel = await interaction.guild.fetch_channel(LAUNCHER_ANNOUNCEMENT_CHANNEL_ID)
-        except (discord.NotFound, discord.Forbidden):
-            await interaction.followup.send("The configured launcher announcement channel is unavailable.", ephemeral=True)
-            return
-    if not isinstance(channel, discord.TextChannel):
-        await interaction.followup.send("The configured launcher announcement destination is not a text channel.", ephemeral=True)
-        return
-
-    role = interaction.guild.get_role(LAUNCHER_ANNOUNCEMENT_ROLE_ID)
-    if role is None:
-        await interaction.followup.send("The configured launcher announcement role was not found.", ephemeral=True)
-        return
-
-    permissions = channel.permissions_for(interaction.guild.me)
-    if not permissions.view_channel or not permissions.send_messages or not permissions.embed_links:
-        await interaction.followup.send(
-            "I need View Channel, Send Messages, and Embed Links permissions in the announcement channel.",
-            ephemeral=True,
-        )
-        return
-    if not role.mentionable and not permissions.mention_everyone:
-        await interaction.followup.send(
-            "I cannot ping the configured role. Make it mentionable or grant the bot Mention Everyone permission.",
-            ephemeral=True,
-        )
-        return
-
-    try:
-        timeout = aiohttp.ClientTimeout(total=10)
-        async with aiohttp.ClientSession(timeout=timeout) as session:
-            async with session.get(
-                "https://api.github.com/repos/ItsDropper/Vanta/releases/latest",
-                headers={"Accept": "application/vnd.github+json", "User-Agent": "Vanta-Discord-Bot"},
-            ) as response:
-                if response.status != 200:
-                    raise RuntimeError(f"GitHub returned HTTP {response.status}")
-                release = await response.json()
-        tag = release.get("tag_name")
-        release_url = release.get("html_url")
-        if (not isinstance(tag, str) or not tag or not isinstance(release_url, str)
-                or not release_url.startswith("https://github.com/ItsDropper/Vanta/releases/")):
-            raise RuntimeError("GitHub returned invalid release metadata")
-    except (aiohttp.ClientError, asyncio.TimeoutError, RuntimeError, ValueError) as exc:
-        print(f"Could not fetch the latest Vanta release: {exc}")
-        await interaction.followup.send(
-            "Could not retrieve the latest Vanta Launcher release from GitHub. No announcement was sent.",
-            ephemeral=True,
-        )
-        return
-
-    title = f"Vanta Launcher Update — {tag}"
-    async for previous in channel.history(limit=100):
-        if previous.author.id == client.user.id and any(
-            embed.title == title for embed in previous.embeds
-        ):
-            await interaction.followup.send(
-                f"{tag} has already been announced in {channel.mention}; no duplicate ping was sent.",
-                ephemeral=True,
-            )
-            return
-
-    notes = release.get("body") or "See the GitHub release page for the full changelog."
-    notes = notes.strip()
-    if len(notes) > 3000:
-        notes = notes[:2997].rstrip() + "..."
-    embed = discord.Embed(
-        title=title,
-        description=f"{notes}\n\n[Download Vanta Launcher and view release details]({release_url})",
-        url=release_url,
-        color=0x3978F6,
-    )
-    embed.set_footer(text="Vanta Launcher • Official Release")
-    published_at = release.get("published_at")
-    if published_at:
-        try:
-            embed.timestamp = datetime.fromisoformat(published_at.replace("Z", "+00:00"))
-        except ValueError:
-            pass
-
-    try:
-        message = await channel.send(
-            content=role.mention,
-            embed=embed,
-            allowed_mentions=discord.AllowedMentions(
-                roles=[role], users=False, everyone=False, replied_user=False
-            ),
-        )
-    except discord.Forbidden:
-        await interaction.followup.send(
-            "Discord rejected the announcement. Check the bot's channel and role-mention permissions.",
-            ephemeral=True,
-        )
-        return
-    await interaction.followup.send(
-        f"Announced {tag} in {channel.mention} (message {message.id}).",
-        ephemeral=True,
-    )
+    result = await announce_latest_launcher_release(interaction.guild)
+    await interaction.followup.send(f"Launcher announcement: {result}.", ephemeral=True)
 
 
 @tree.command(name="say", description="Make the bot send a message to a channel")
