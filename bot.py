@@ -228,7 +228,9 @@ class SupportTicketModal(discord.ui.Modal, title="Create Support Ticket"):
 class SupportPanelView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
-        self.topic = "General support"
+        # Persistent views are shared across users; keep selection state keyed by
+        # Discord user ID so one member cannot change another member's ticket topic.
+        self.selected_topics: dict[int, str] = {}
 
     @discord.ui.select(
         cls=discord.ui.Select,
@@ -246,9 +248,10 @@ class SupportPanelView(discord.ui.View):
         row=0,
     )
     async def choose_topic(self, interaction: discord.Interaction, select: discord.ui.Select):
-        self.topic = select.values[0]
+        topic = select.values[0]
+        self.selected_topics[interaction.user.id] = topic
         await interaction.response.send_message(
-            f"Support topic set to **{discord.utils.escape_markdown(self.topic)}**. Select Create ticket when you're ready.",
+            f"Support topic set to **{discord.utils.escape_markdown(topic)}**. Select Create ticket when you're ready.",
             ephemeral=True,
         )
 
@@ -260,7 +263,8 @@ class SupportPanelView(discord.ui.View):
         row=1,
     )
     async def open_support_ticket(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.send_modal(SupportTicketModal(self.topic))
+        topic = self.selected_topics.pop(interaction.user.id, "General support")
+        await interaction.response.send_modal(SupportTicketModal(topic))
 
     @discord.ui.button(
         label="My open tickets",
