@@ -899,7 +899,6 @@ async def sendapplication(interaction: discord.Interaction, channel: discord.Tex
     embed.add_field(name="🧰  Product support", value="Help users with Vanta Launcher and related projects.", inline=True)
     embed.add_field(name="📋  Review process", value="Applications are reviewed by authorized staff.", inline=True)
     embed.set_author(name="VANTA  •  COMMUNITY OPERATIONS")
-    embed.set_thumbnail(url="https://github.com/ItsDropper.png")
     embed.set_footer(text="Vanta Staff  •  Applications are reviewed on an ongoing basis")
     embed.timestamp = datetime.utcnow()
     await channel.send(embed=embed, view=ApplicationPanelView())
@@ -929,7 +928,6 @@ async def sendsupportpanel(interaction: discord.Interaction, channel: discord.Te
     embed.add_field(name="🧭  Clear ownership", value="Staff can assign tickets so requests do not get lost.", inline=True)
     embed.add_field(name="📚  Persistent history", value="Ticket records are retained for support operations.", inline=True)
     embed.set_author(name="VANTA  •  COMMUNITY OPERATIONS")
-    embed.set_thumbnail(url="https://github.com/ItsDropper.png")
     embed.set_footer(text="Vanta Support  •  Select Create Support Ticket to begin")
     embed.timestamp = datetime.utcnow()
 
