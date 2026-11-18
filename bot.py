@@ -375,23 +375,23 @@ class SupportPanelView(discord.ui.View):
         await interaction.response.defer(ephemeral=True)
         try:
             tickets, _ = await database.list_support_tickets(
-                str(interaction.guild.id), status="open", limit=25,
+                str(interaction.guild.id), owner_id=str(interaction.user.id),
+                status="open", limit=25,
             )
         except DatabaseError as exc:
             await interaction.followup.send(
                 f"Ticket history is temporarily unavailable: {exc}", ephemeral=True
             )
             return
-        owned = [ticket for ticket in tickets if str(ticket.get("owner_id")) == str(interaction.user.id)]
         embed = discord.Embed(
             title="YOUR OPEN SUPPORT TICKETS",
             description="Your active support conversations in this server.",
             color=0x3978F6,
         )
-        if not owned:
+        if not tickets:
             embed.description = "You do not have any open support tickets in this server."
         else:
-            for ticket in owned[:10]:
+            for ticket in tickets[:10]:
                 channel = interaction.guild.get_channel(int(ticket["channel_id"]))
                 value = channel.mention if channel else "Channel unavailable"
                 embed.add_field(
