@@ -500,7 +500,7 @@ class LegacyTierPanelView(discord.ui.View):
 
 # ── Bot setup ─────────────────────────────────────────────────────────────────
 
-async def announce_latest_launcher_release(guild: discord.Guild) -> str:
+async def _announce_latest_launcher_release(guild: discord.Guild) -> str:
     config = await database.get_guild_config(str(guild.id)) or {}
     announcement_channel_id = int(config.get("launcher_announcement_channel_id") or LAUNCHER_ANNOUNCEMENT_CHANNEL_ID)
     announcement_role_id = int(config.get("launcher_announcement_role_id") or LAUNCHER_ANNOUNCEMENT_ROLE_ID)
@@ -604,6 +604,15 @@ async def announce_latest_launcher_release(guild: discord.Guild) -> str:
         print(f"Release {tag} was posted but its D1 delivery record failed: {exc}")
         return f"announced {tag}, but delivery ledger write failed"
     return f"announced {tag} as message {message.id}"
+
+
+_release_announcement_lock = asyncio.Lock()
+
+
+async def announce_latest_launcher_release(guild: discord.Guild) -> str:
+    """Serialize release checks so startup and the hourly monitor cannot double-post."""
+    async with _release_announcement_lock:
+        return await _announce_latest_launcher_release(guild)
 
 
 class Client(discord.Client):
