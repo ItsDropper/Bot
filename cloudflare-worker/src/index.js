@@ -54,6 +54,30 @@ async function handle(request, env) {
     return json({ ok: true });
   }
 
+  if (path === "/v1/minecraft-links/stats" && request.method === "GET") {
+    const stats = await env.DB.prepare(
+      "SELECT COUNT(*) AS total, MIN(linked_at) AS first_linked_at, MAX(linked_at) AS latest_linked_at FROM minecraft_links"
+    ).first();
+    return json({ stats });
+  }
+
+  if (path === "/v1/minecraft-links" && request.method === "GET") {
+    const url = new URL(request.url);
+    const limit = Number(url.searchParams.get("limit") || 10);
+    const offset = Number(url.searchParams.get("offset") || 0);
+    if (!Number.isInteger(limit) || limit < 1 || limit > 25 ||
+        !Number.isInteger(offset) || offset < 0 || offset > 1000000) {
+      return json({ error: "Invalid pagination parameters" }, 400);
+    }
+    const [rows, count] = await Promise.all([
+      env.DB.prepare(
+        "SELECT discord_id, mc_username, linked_at FROM minecraft_links ORDER BY linked_at DESC, discord_id ASC LIMIT ? OFFSET ?"
+      ).bind(limit, offset).all(),
+      env.DB.prepare("SELECT COUNT(*) AS total FROM minecraft_links").first(),
+    ]);
+    return json({ links: rows.results || [], total: count.total || 0 });
+  }
+
   const discordMatch = path.match(/^\/v1\/minecraft-links\/discord\/([0-9]{15,22})$/);
   if (discordMatch) {
     const discordId = discordMatch[1];
