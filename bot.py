@@ -523,8 +523,11 @@ async def announce_latest_launcher_release(guild: discord.Guild) -> str:
         ):
             return f"{tag} already announced"
 
-    notes = release.get("body") or "See the GitHub release page for the full changelog."
-    notes = notes.strip()
+    notes = release.get("body")
+    if not isinstance(notes, str) or not notes.strip():
+        notes = "See the GitHub release page for the full changelog."
+    else:
+        notes = notes.strip()
     if len(notes) > 3000:
         notes = notes[:2997].rstrip() + "..."
     embed = discord.Embed(
