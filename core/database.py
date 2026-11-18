@@ -203,6 +203,48 @@ class CloudflareDatabase:
 
 
 
+
+    async def add_ticket_note(self, *, guild_id: str, channel_id: str,
+                              actor_id: str, note: str, created_at: str):
+        if not re.fullmatch(r"[0-9]{15,22}", str(guild_id)) or not re.fullmatch(r"[0-9]{15,22}", str(channel_id)):
+            raise ValueError("Invalid ticket identifiers")
+        if not re.fullmatch(r"[0-9]{15,22}", str(actor_id)):
+            raise ValueError("Invalid ticket note actor")
+        if not isinstance(note, str) or not note.strip() or len(note) > 1000:
+            raise ValueError("Ticket note must contain 1–1000 characters")
+        result = await self._request(
+            "POST", f"/v1/tickets/channel/{quote(str(channel_id), safe='')}/notes",
+            payload={"guild_id": str(guild_id), "actor_id": str(actor_id),
+                     "note": note.strip(), "created_at": created_at},
+        )
+        return result["event"]
+
+    async def set_ticket_priority(self, *, guild_id: str, channel_id: str,
+                                  actor_id: str, priority: str, created_at: str):
+        if priority not in {"low", "normal", "high", "urgent"}:
+            raise ValueError("Invalid ticket priority")
+        if not re.fullmatch(r"[0-9]{15,22}", str(guild_id)) or not re.fullmatch(r"[0-9]{15,22}", str(channel_id)):
+            raise ValueError("Invalid ticket identifiers")
+        if not re.fullmatch(r"[0-9]{15,22}", str(actor_id)):
+            raise ValueError("Invalid ticket priority actor")
+        result = await self._request(
+            "PATCH", f"/v1/tickets/channel/{quote(str(channel_id), safe='')}/priority",
+            payload={"guild_id": str(guild_id), "actor_id": str(actor_id),
+                     "priority": priority, "created_at": created_at},
+        )
+        return result["ticket"]
+
+    async def list_ticket_activity(self, *, guild_id: str, channel_id: str, limit: int = 15):
+        if not re.fullmatch(r"[0-9]{15,22}", str(guild_id)) or not re.fullmatch(r"[0-9]{15,22}", str(channel_id)):
+            raise ValueError("Invalid ticket identifiers")
+        if not 1 <= limit <= 25:
+            raise ValueError("Ticket activity page size must be between 1 and 25")
+        result = await self._request(
+            "GET", f"/v1/tickets/channel/{quote(str(channel_id), safe='')}/activity"
+            f"?guild_id={quote(str(guild_id), safe='')}&limit={limit}",
+        )
+        return result["events"]
+
     async def create_moderation_case(self, *, guild_id: str, target_id: str,
                                      moderator_id: str, action: str, reason: str,
                                      created_at: str, expires_at: str | None = None):
