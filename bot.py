@@ -2,7 +2,7 @@ import os
 import asyncio
 import re
 import aiohttp
-from datetime import datetime
+from datetime import datetime, timezone
 import discord
 from discord import app_commands
 from discord.ext import tasks
@@ -31,6 +31,10 @@ LAUNCHER_ANNOUNCEMENT_CHANNEL_ID = 1530652249653645422
 LAUNCHER_ANNOUNCEMENT_ROLE_ID = 1530664744929722418
 
 intents = discord.Intents.default()
+# Member joins and guild message metadata drive onboarding and ticket automation.
+# Message content is never requested or persisted.
+intents.members = True
+intents.guild_messages = True
 
 # ── Cloudflare D1 ─────────────────────────────────────────────────────────────
 
@@ -813,15 +817,34 @@ async def announce_latest_launcher_release(guild: discord.Guild) -> str:
         return await _announce_latest_launcher_release(guild)
 
 
+class WelcomePanelView(discord.ui.View):
+    """Persistent, branded entry point for new Vanta community members."""
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    @discord.ui.button(label="Getting started", style=discord.ButtonStyle.secondary,
+                       custom_id="vanta_onboarding_start", emoji=VANTA_EMOJI)
+    async def getting_started(self, interaction: discord.Interaction, button: discord.ui.Button):
+        embed = discord.Embed(title=f"{VANTA_EMOJI_MARKUP}  YOUR VANTA START GUIDE",
+            description="A quick route to getting set up and finding the right help.", color=0x3978F6)
+        embed.add_field(name="01  /  GET SET UP", value="Read the server rules and check the information channels before posting.", inline=False)
+        embed.add_field(name="02  /  CONNECT YOUR ACCOUNT", value="Use **/link** to connect your Minecraft username to Discord.", inline=False)
+        embed.add_field(name="03  /  GET SUPPORT", value="Open the Vanta Support panel for launcher installation, loader compatibility, account access or bug reports.", inline=False)
+        embed.set_footer(text="VANTA  •  COMMUNITY ONBOARDING")
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+
+
 class Client(discord.Client):
     async def setup_hook(self):
         self.add_view(CloseSupportTicketView())
+        self.add_view(WelcomePanelView())
         self.add_view(SupportPanelView())
         self.add_view(ApplicationPanelView())
         self.add_view(LegacyTesterApplicationView())
         self.add_view(LegacyTierPanelView())
         self.add_view(ApplicationResultView())
         self.launcher_release_announcer.start()
+        self.ticket_automation_monitor.start()
 
     @tasks.loop(hours=1)
     async def launcher_release_announcer(self):
@@ -836,6 +859,94 @@ class Client(discord.Client):
     @launcher_release_announcer.before_loop
     async def before_launcher_release_announcer(self):
         await self.wait_until_ready()
+
+    @tasks.loop(minutes=15)
+    async def ticket_automation_monitor(self):
+        """Alert staff when an open ticket has waited two hours for a response."""
+        if database is None:
+            return
+        now = datetime.utcnow()
+        for guild in self.guilds:
+            try:
+                config = await database.get_guild_config(str(guild.id)) or {}
+                support_role_id = int(config.get("support_role_id") or SUPPORT_ROLE_ID)
+                support_role = guild.get_role(support_role_id)
+                offset = 0
+                while True:
+                    tickets, total = await database.list_support_tickets(str(guild.id), status="open", limit=25, offset=offset)
+                    for ticket in tickets:
+                        channel = guild.get_channel(int(ticket["channel_id"]))
+                        if not isinstance(channel, discord.TextChannel):
+                            continue
+                        customer_at = ticket.get("last_customer_message_at")
+                        staff_at = ticket.get("last_staff_message_at")
+                        waiting_for_staff = not staff_at or bool(customer_at and customer_at > staff_at)
+                        if not waiting_for_staff or ticket.get("last_escalated_at"):
+                            continue
+                        baseline = customer_at or ticket.get("created_at")
+                        try:
+                            waiting_since = datetime.fromisoformat(baseline.replace("Z", "+00:00"))
+                            if waiting_since.tzinfo is not None:
+                                waiting_since = waiting_since.replace(tzinfo=None)
+                        except (AttributeError, ValueError):
+                            continue
+                        if (now - waiting_since).total_seconds() < 7200:
+                            continue
+                        embed = discord.Embed(title=f"{VANTA_EMOJI_MARKUP}  SUPPORT RESPONSE REQUIRED",
+                            description=f"{channel.mention} has been waiting for a staff response for more than two hours.",
+                            color=0xE0A33A)
+                        embed.add_field(name="REQUESTER", value=f"<@{ticket['owner_id']}>", inline=True)
+                        embed.add_field(name="PRIORITY", value=str(ticket.get("priority") or "normal").upper(), inline=True)
+                        embed.add_field(name="WAITING", value=f"<t:{int(waiting_since.replace(tzinfo=timezone.utc).timestamp())}:R>", inline=True)
+                        embed.set_footer(text="VANTA SUPPORT  •  Automated response-time escalation")
+                        try:
+                            await channel.send(content=support_role.mention if support_role else None, embed=embed,
+                                allowed_mentions=discord.AllowedMentions(roles=[support_role] if support_role else [], users=False, everyone=False))
+                            await database.mark_ticket_escalated(guild_id=str(guild.id), channel_id=str(channel.id), escalated_at=now.isoformat() + "Z")
+                        except (discord.Forbidden, discord.HTTPException, DatabaseError) as exc:
+                            print(f"Ticket escalation failed for {guild.id}/{channel.id}: {type(exc).__name__}: {exc}")
+                    offset += len(tickets)
+                    if not tickets or offset >= total:
+                        break
+            except Exception as exc:
+                print(f"Ticket automation failed in guild {guild.id}: {type(exc).__name__}: {exc}")
+
+    @ticket_automation_monitor.before_loop
+    async def before_ticket_automation_monitor(self):
+        await self.wait_until_ready()
+    async def on_member_join(self, member: discord.Member):
+        """Post an automatic welcome panel; do not send unsolicited DMs."""
+        guild = member.guild
+        candidates = [guild.system_channel] + [c for c in guild.text_channels if c.name.casefold() in {"welcome", "start-here", "introductions"}]
+        channel = next((c for c in candidates if isinstance(c, discord.TextChannel) and c.permissions_for(guild.me).send_messages and c.permissions_for(guild.me).embed_links), None)
+        if channel is None:
+            print(f"No usable welcome channel in guild {guild.id}; member welcome skipped.")
+            return
+        embed = discord.Embed(title=f"{VANTA_EMOJI_MARKUP}  WELCOME TO VANTA",
+            description=f"Welcome {member.mention}. This is the community for Vanta Launcher and the wider Vanta modding ecosystem.", color=0x3978F6)
+        embed.add_field(name="01  /  FIND YOUR WAY", value="Read the server rules and start-here information before posting.", inline=False)
+        embed.add_field(name="02  /  CONNECT", value="Use `/link` if you want to connect your Minecraft account.", inline=False)
+        embed.add_field(name="03  /  GET HELP", value="Use the Support Center panel for private, tracked technical support.", inline=False)
+        embed.set_thumbnail(url=member.display_avatar.url)
+        embed.set_footer(text="VANTA  •  COMMUNITY ONBOARDING")
+        embed.timestamp = datetime.utcnow()
+        try:
+            await channel.send(content=member.mention, embed=embed, view=WelcomePanelView(), allowed_mentions=discord.AllowedMentions(users=[member], roles=False, everyone=False))
+        except (discord.Forbidden, discord.HTTPException) as exc:
+            print(f"Could not welcome member {member.id} in guild {guild.id}: {type(exc).__name__}: {exc}")
+
+    async def on_message(self, message: discord.Message):
+        """Record ticket message metadata only; message contents are never stored."""
+        if message.guild is None or message.author.bot:
+            return
+        channel = message.channel
+        if not isinstance(channel, discord.TextChannel) or not channel.name.startswith("support-") or not re.fullmatch(r"vanta_ticket_owner:[0-9]{15,22}", channel.topic or ""):
+            return
+        try:
+            staff_reply = isinstance(message.author, discord.Member) and await is_support_staff(message.author, message.guild)
+            await database.record_ticket_message(guild_id=str(message.guild.id), channel_id=str(channel.id), actor_id=str(message.author.id), actor_type="staff" if staff_reply else "customer", created_at=message.created_at.isoformat())
+        except DatabaseError as exc:
+            print(f"Could not record ticket activity for {channel.id}: {exc}")
 
     async def on_ready(self):
         print(f"Logged in as {self.user} (ID: {self.user.id})")
