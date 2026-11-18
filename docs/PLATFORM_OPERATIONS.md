@@ -36,6 +36,12 @@ The Worker API token must match the secret configured on the Cloudflare Worker. 
 
 The bot's highest role must be above a target for timeout, kick and ban. The server owner cannot be moderated. A case is inserted as `pending` before Discord is called, then atomically finalized as `applied` or `failed`. If D1 is unavailable after Discord accepts an action, the case remains pending rather than falsely claiming it was finalized.
 
+## Technical support intake
+
+The public support panel uses a structured intake for launcher, mod-compatibility and bug reports. It captures Minecraft version, loader and version, Vanta Launcher version, reproduction details, and an optional HTTP(S) log or crash-report link. Unknown environment fields may be left blank.
+
+The intake is persisted with the support ticket and displayed in its opening embed so staff can triage without repeatedly asking for basic environment details. Users are instructed to remove access tokens and private information before sharing logs. General account questions continue to use the shorter support form.
+
 ## Ticket staff commands
 
 | Command | Access | Purpose |
