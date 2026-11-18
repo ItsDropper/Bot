@@ -548,6 +548,14 @@ async def announce_latest_launcher_release(guild: discord.Guild) -> str:
         print(f"Could not fetch the latest Vanta release: {exc}")
         return "GitHub release lookup failed"
 
+    try:
+        existing_announcement = await database.get_release_announcement(str(guild.id), "launcher", tag)
+    except DatabaseError as exc:
+        print(f"Release ledger unavailable for guild {guild.id}: {exc}")
+        return "release delivery ledger unavailable"
+    if existing_announcement:
+        return f"{tag} already announced (persistent D1 record)"
+
     title = f"Vanta Launcher Update — {tag}"
     async for previous in channel.history(limit=100):
         if previous.author.id == client.user.id and any(
@@ -586,6 +594,15 @@ async def announce_latest_launcher_release(guild: discord.Guild) -> str:
         )
     except discord.Forbidden:
         return "Discord rejected the announcement"
+    try:
+        await database.record_release_announcement(
+            guild_id=str(guild.id), project="launcher", release_tag=tag,
+            channel_id=str(channel.id), message_id=str(message.id),
+            announced_at=datetime.utcnow().isoformat(),
+        )
+    except DatabaseError as exc:
+        print(f"Release {tag} was posted but its D1 delivery record failed: {exc}")
+        return f"announced {tag}, but delivery ledger write failed"
     return f"announced {tag} as message {message.id}"
 
 
