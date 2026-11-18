@@ -40,6 +40,7 @@ The bot's highest role must be above a target for timeout, kick and ban. The ser
 
 | Command | Access | Purpose |
 | --- | --- | --- |
+| `/ticketqueue` | Configured support staff or administrator | View open tickets ordered by priority, then age |
 | `/ticketnote` | Configured support staff or administrator | Store a private internal note in D1; never posts the note in the public ticket channel |
 | `/ticketpriority` | Configured support staff or administrator | Set low, normal, high or urgent priority and record the change atomically |
 | `/ticketactivity` | Configured support staff or administrator | View staff notes and priority changes |
