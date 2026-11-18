@@ -26,9 +26,16 @@ async def init_db():
     if not worker_url or not api_token:
         raise RuntimeError("CLOUDFLARE_WORKER_URL and CLOUDFLARE_BOT_API_TOKEN are required")
     if database is None:
-        database = CloudflareDatabase(worker_url, api_token)
-        await database.start()
-    await database.healthcheck()
+        candidate = CloudflareDatabase(worker_url, api_token)
+        await candidate.start()
+        try:
+            await candidate.healthcheck()
+        except Exception:
+            await candidate.close()
+            raise
+        database = candidate
+    else:
+        await database.healthcheck()
     print("Cloudflare D1 connection verified.")
 
 
