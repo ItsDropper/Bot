@@ -62,8 +62,17 @@ Cloudflare deployment applies all pending files in `cloudflare-worker/migrations
 - `0006_release_delivery_ledger.sql`: durable release announcement records
 - `0007_moderation_cases.sql`: moderation case history
 - `0008_ticket_activity.sql`: ticket priorities and staff activity
+- `0009_ticket_automation.sql`: ticket message timestamps, first-response tracking and escalation state
 
 Do not manually delete D1 migration records or rerun destructive schema operations. Use the deployment workflow so migration state remains tracked.
+
+## Member onboarding and ticket automation
+
+- Enable the **Server Members Intent** in the Discord Developer Portal (Bot → Privileged Gateway Intents). The bot requests this intent to receive member-join events. `MESSAGE CONTENT INTENT` is not required; ticket tracking stores only actor IDs and timestamps, never message text.
+- New members receive a branded welcome embed in the server system channel, falling back to `#welcome`, `#start-here` or `#introductions`. The persistent **Getting started** button opens a private onboarding guide.
+- The bot records customer and staff ticket message timestamps in D1. It does not archive message contents.
+- Every 15 minutes, open tickets waiting more than two hours for a staff response are escalated in their ticket channel with a support-role-only mention. A ticket is escalated once per unanswered customer message; a new customer reply resets the escalation state. A staff reply clears the waiting condition.
+- Ensure the bot can view ticket channels, send embeds and mention the configured support role. The support role must allow the bot to mention it.
 
 ## Operational notes
 
