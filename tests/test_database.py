@@ -287,5 +287,36 @@ class CloudflareDatabaseTests(unittest.IsolatedAsyncioTestCase):
             await client.list_moderation_cases("not-a-guild")
         self.assertEqual(session.calls, [])
 
+    async def test_ticket_message_activity_uses_metadata_only_endpoint(self):
+        client, session = self.make_client(200, {"ticket": {"first_response_at": "2026-11-18T14:00:00Z"}})
+        result = await client.record_ticket_message(
+            guild_id="123456789012345678", channel_id="223456789012345678",
+            actor_id="323456789012345678", actor_type="staff",
+            created_at="2026-11-18T14:00:00Z",
+        )
+        self.assertIn("first_response_at", result)
+        self.assertTrue(session.calls[0][1].endswith("/messages"))
+        self.assertEqual(session.calls[0][2]["json"]["actor_type"], "staff")
+        self.assertNotIn("content", session.calls[0][2]["json"])
+
+    async def test_ticket_message_rejects_invalid_actor_type(self):
+        client, session = self.make_client(200, {"ticket": {}})
+        with self.assertRaises(ValueError):
+            await client.record_ticket_message(
+                guild_id="123456789012345678", channel_id="223456789012345678",
+                actor_id="323456789012345678", actor_type="bot",
+                created_at="2026-11-18T14:00:00Z",
+            )
+        self.assertEqual(session.calls, [])
+
+    async def test_ticket_escalation_uses_persistent_endpoint(self):
+        client, session = self.make_client(200, {"ticket": {"last_escalated_at": "2026-11-18T14:00:00Z"}})
+        result = await client.mark_ticket_escalated(
+            guild_id="123456789012345678", channel_id="223456789012345678",
+            escalated_at="2026-11-18T14:00:00Z",
+        )
+        self.assertIn("last_escalated_at", result)
+        self.assertTrue(session.calls[0][1].endswith("/escalations"))
+
 if __name__ == "__main__":
     unittest.main()
