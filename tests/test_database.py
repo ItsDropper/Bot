@@ -313,7 +313,7 @@ class CloudflareDatabaseTests(unittest.IsolatedAsyncioTestCase):
         client, session = self.make_client(200, {"ticket": {"last_escalated_at": "2026-11-18T14:00:00Z"}})
         result = await client.mark_ticket_escalated(
             guild_id="123456789012345678", channel_id="223456789012345678",
-            escalated_at="2026-11-18T14:00:00Z",
+            actor_id="323456789012345678", escalated_at="2026-11-18T14:00:00Z",
         )
         self.assertIn("last_escalated_at", result)
         self.assertTrue(session.calls[0][1].endswith("/escalations"))
