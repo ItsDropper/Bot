@@ -78,6 +78,67 @@ async function handle(request, env) {
     return json({ links: rows.results || [], total: count.total || 0 });
   }
 
+  const guildConfigMatch = path.match(/^\\/v1\\/guilds\\/([0-9]{15,22})\\/config$/);
+  if (guildConfigMatch && request.method === "GET") {
+    const config = await env.DB.prepare("SELECT * FROM guild_config WHERE guild_id = ?").bind(guildConfigMatch[1]).first();
+    return json({ config: config || null });
+  }
+  if (guildConfigMatch && request.method === "PUT") {
+    let body;
+    try { body = await readJson(request); } catch { return json({ error: "Invalid JSON request body" }, 400); }
+    const idFields = ["support_category_id", "support_role_id", "ticket_log_channel_id", "application_result_channel_id", "launcher_announcement_channel_id", "launcher_announcement_role_id"];
+    const config = {};
+    for (const field of idFields) {
+      const value = body?.[field];
+      if (value !== undefined && value !== null && value !== "" && (typeof value !== "string" || !/^[0-9]{15,22}$/.test(value))) {
+        return json({ error: `Invalid ${field}` }, 400);
+      }
+      config[field] = value || null;
+    }
+    if (typeof body?.updated_by !== "string" || !/^[0-9]{15,22}$/.test(body.updated_by) ||
+        typeof body?.updated_at !== "string" || !Number.isFinite(Date.parse(body.updated_at))) {
+      return json({ error: "Invalid configuration audit metadata" }, 400);
+    }
+    await env.DB.prepare(
+      "INSERT INTO guild_config (guild_id, support_category_id, support_role_id, ticket_log_channel_id, application_result_channel_id, launcher_announcement_channel_id, launcher_announcement_role_id, updated_by, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) " +
+      "ON CONFLICT(guild_id) DO UPDATE SET support_category_id=excluded.support_category_id, support_role_id=excluded.support_role_id, ticket_log_channel_id=excluded.ticket_log_channel_id, application_result_channel_id=excluded.application_result_channel_id, launcher_announcement_channel_id=excluded.launcher_announcement_channel_id, launcher_announcement_role_id=excluded.launcher_announcement_role_id, updated_by=excluded.updated_by, updated_at=excluded.updated_at"
+    ).bind(guildConfigMatch[1], config.support_category_id, config.support_role_id, config.ticket_log_channel_id, config.application_result_channel_id, config.launcher_announcement_channel_id, config.launcher_announcement_role_id, body.updated_by, body.updated_at).run();
+    const saved = await env.DB.prepare("SELECT * FROM guild_config WHERE guild_id = ?").bind(guildConfigMatch[1]).first();
+    return json({ config: saved });
+  }
+
+  if (path === "/v1/audit-events" && request.method === "POST") {
+    let body;
+    try { body = await readJson(request); } catch { return json({ error: "Invalid JSON request body" }, 400); }
+    const validId = value => typeof value === "string" && /^[0-9]{15,22}$/.test(value);
+    if (!validId(body?.guild_id) || !validId(body?.actor_id) ||
+        typeof body?.action !== "string" || !/^[a-z][a-z0-9_.-]{1,63}$/.test(body.action) ||
+        (body.target_id != null && !validId(body.target_id)) ||
+        typeof body?.created_at !== "string" || !Number.isFinite(Date.parse(body.created_at))) {
+      return json({ error: "Invalid audit event" }, 400);
+    }
+    const details = body.details ?? {};
+    const serialized = JSON.stringify(details);
+    if (serialized.length > 3000) return json({ error: "Audit details are too large" }, 400);
+    const result = await env.DB.prepare(
+      "INSERT INTO audit_events (guild_id, actor_id, action, target_id, details, created_at) VALUES (?, ?, ?, ?, ?, ?)"
+    ).bind(body.guild_id, body.actor_id, body.action, body.target_id || null, serialized, body.created_at).run();
+    return json({ event_id: result.meta?.last_row_id ?? null }, 201);
+  }
+
+  if (path === "/v1/audit-events" && request.method === "GET") {
+    const url = new URL(request.url);
+    const guildId = url.searchParams.get("guild_id") || "";
+    const limit = Number(url.searchParams.get("limit") || 10);
+    const offset = Number(url.searchParams.get("offset") || 0);
+    if (!/^[0-9]{15,22}$/.test(guildId) || !Number.isInteger(limit) || limit < 1 || limit > 25 ||
+        !Number.isInteger(offset) || offset < 0 || offset > 1000000) return json({ error: "Invalid audit query" }, 400);
+    const rows = await env.DB.prepare(
+      "SELECT event_id, guild_id, actor_id, action, target_id, details, created_at FROM audit_events WHERE guild_id = ? ORDER BY event_id DESC LIMIT ? OFFSET ?"
+    ).bind(guildId, limit, offset).all();
+    return json({ events: rows.results || [] });
+  }
+
   if (path === "/v1/tickets" && request.method === "POST") {
     let body;
     try { body = await readJson(request); } catch { return json({ error: "Invalid JSON request body" }, 400); }
