@@ -9,7 +9,7 @@ from discord import app_commands
 from core.database import DatabaseError
 
 
-def register_ticket_commands(tree, database_provider, support_only, audit_recorder):
+def register_ticket_commands(tree, database_provider, support_only, is_support_staff, audit_recorder):
     def database():
         value = database_provider()
         if value is None:
@@ -75,6 +75,47 @@ def register_ticket_commands(tree, database_provider, support_only, audit_record
         )
         await interaction.followup.send(
             f"Priority for {channel.mention} set to **{ticket['priority'].upper()}**.",
+            ephemeral=True,
+        )
+
+    @tree.command(name="ticketassign", description="Assign an open support ticket to a support staff member")
+    @app_commands.describe(channel="Open support ticket", staff_member="Support staff member responsible for this ticket")
+    @app_commands.guild_only()
+    @support_only()
+    async def ticketassign(
+        interaction: discord.Interaction,
+        channel: discord.TextChannel,
+        staff_member: discord.Member,
+    ):
+        if not channel.name.startswith("support-"):
+            await interaction.response.send_message("Select an open support ticket channel.", ephemeral=True)
+            return
+        if not await is_support_staff(staff_member, interaction.guild):
+            await interaction.response.send_message(
+                "The assignee must have the configured Vanta support role or be a server administrator.",
+                ephemeral=True,
+            )
+            return
+        await interaction.response.defer(ephemeral=True)
+        assigned_at = datetime.now(timezone.utc).isoformat()
+        try:
+            ticket = await database().assign_support_ticket(
+                guild_id=str(interaction.guild.id),
+                channel_id=str(channel.id),
+                assigned_to=str(staff_member.id),
+                assigned_by=str(interaction.user.id),
+                assigned_at=assigned_at,
+            )
+        except DatabaseError as exc:
+            await interaction.followup.send(f"Could not assign this ticket: {exc}", ephemeral=True)
+            return
+        await audit_recorder(
+            interaction.guild.id, interaction.user.id, "ticket.assigned",
+            target_id=channel.id,
+            details={"assigned_to": str(staff_member.id)},
+        )
+        await interaction.followup.send(
+            f"{channel.mention} is now assigned to {staff_member.mention}.",
             ephemeral=True,
         )
 
@@ -153,6 +194,9 @@ def register_ticket_commands(tree, database_provider, support_only, audit_record
                 if action == "internal_note":
                     note = discord.utils.escape_markdown(str(details.get("note", "")))[:220]
                     summary = f"**Internal note** · {note}"
+                elif action == "assignment_changed":
+                    assignee_id = details.get("assigned_to")
+                    summary = f"**Assigned to** · <@{assignee_id}>" if assignee_id else "**Ticket unassigned**"
                 else:
                     summary = f"**Priority changed** · {str(details.get('priority', 'unknown')).upper()}"
                 timestamp = int(datetime.fromisoformat(event["created_at"].replace("Z", "+00:00")).timestamp())
