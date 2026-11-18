@@ -63,7 +63,9 @@ class CloudflareDatabase:
                 if response.status == 404 and allow_missing:
                     return None
                 if response.status == 409:
-                    raise MinecraftLinkConflict("Minecraft username is already linked")
+                    if path.startswith("/v1/minecraft-links/"):
+                        raise MinecraftLinkConflict("Minecraft username is already linked")
+                    raise DatabaseError(body.get("error", "The database rejected a conflicting operation"))
                 if response.status < 200 or response.status >= 300:
                     message = body.get("error") if isinstance(body, dict) else None
                     raise DatabaseError(message or f"Cloudflare Worker returned HTTP {response.status}")
