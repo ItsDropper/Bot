@@ -171,5 +171,47 @@ class CloudflareDatabaseTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(result)
         self.assertTrue(session.calls[0][1].endswith("/v1/releases/123456789012345678/launcher/v1.3.3"))
 
+
+    async def test_create_moderation_case_persists_pending_record(self):
+        case = {"case_id": 41, "action": "warn", "status": "pending"}
+        client, session = self.make_client(201, {"case": case})
+        result = await client.create_moderation_case(
+            guild_id="123456789012345678", target_id="223456789012345678",
+            moderator_id="323456789012345678", action="warn", reason="Repeated spam",
+            created_at="2026-11-18T12:00:00Z",
+        )
+        self.assertEqual(result, case)
+        self.assertEqual(session.calls[0][0], "POST")
+        self.assertTrue(session.calls[0][1].endswith("/v1/moderation/cases"))
+        self.assertEqual(session.calls[0][2]["json"]["status"] if "status" in session.calls[0][2]["json"] else "pending", "pending")
+
+    async def test_finalize_moderation_case_records_failure_reason(self):
+        case = {"case_id": 41, "status": "failed"}
+        client, session = self.make_client(200, {"case": case})
+        result = await client.complete_moderation_case(
+            41, status="failed", completed_at="2026-11-18T12:01:00Z",
+            failure_reason="Forbidden",
+        )
+        self.assertEqual(result, case)
+        self.assertEqual(session.calls[0][0], "PATCH")
+        self.assertEqual(session.calls[0][2]["json"]["failure_reason"], "Forbidden")
+
+    async def test_moderation_case_listing_is_guild_and_target_scoped(self):
+        rows = [{"case_id": 41, "action": "warn"}]
+        client, session = self.make_client(200, {"cases": rows, "total": 1})
+        self.assertEqual(
+            await client.list_moderation_cases(
+                "123456789012345678", target_id="223456789012345678", limit=5
+            ),
+            (rows, 1),
+        )
+        self.assertIn("target_id=223456789012345678", session.calls[0][1])
+
+    async def test_moderation_case_listing_rejects_invalid_ids(self):
+        client, session = self.make_client(200, {"cases": [], "total": 0})
+        with self.assertRaises(ValueError):
+            await client.list_moderation_cases("not-a-guild")
+        self.assertEqual(session.calls, [])
+
 if __name__ == "__main__":
     unittest.main()
