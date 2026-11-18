@@ -230,7 +230,7 @@ class SupportPanelView(discord.ui.View):
         super().__init__(timeout=None)
         # Persistent views are shared across users; keep selection state keyed by
         # Discord user ID so one member cannot change another member's ticket topic.
-        self.selected_topics: dict[int, str] = {}
+        self.selected_topics: dict[tuple[int, int], str] = {}
 
     @discord.ui.select(
         cls=discord.ui.Select,
@@ -249,7 +249,7 @@ class SupportPanelView(discord.ui.View):
     )
     async def choose_topic(self, interaction: discord.Interaction, select: discord.ui.Select):
         topic = select.values[0]
-        self.selected_topics[interaction.user.id] = topic
+        self.selected_topics[(interaction.guild_id, interaction.user.id)] = topic
         await interaction.response.send_message(
             f"Support topic set to **{discord.utils.escape_markdown(topic)}**. Select Create ticket when you're ready.",
             ephemeral=True,
@@ -263,7 +263,7 @@ class SupportPanelView(discord.ui.View):
         row=1,
     )
     async def open_support_ticket(self, interaction: discord.Interaction, button: discord.ui.Button):
-        topic = self.selected_topics.pop(interaction.user.id, "General support")
+        topic = self.selected_topics.pop((interaction.guild_id, interaction.user.id), "General support")
         await interaction.response.send_modal(SupportTicketModal(topic))
 
     @discord.ui.button(
