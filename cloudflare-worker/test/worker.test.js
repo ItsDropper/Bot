@@ -134,7 +134,7 @@ test("creates a support ticket using bound values", async () => {
   const response = await worker.fetch(
     new Request("https://worker.example/v1/tickets", {
       method: "POST",
-      headers: { Authorization: \`Bearer \${token}\`, "Content-Type": "application/json" },
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
       body: JSON.stringify({
         ticket_id: "123:456", guild_id: "123456789012345678",
         channel_id: "223456789012345678", owner_id: "323456789012345678",
@@ -156,7 +156,7 @@ test("rejects malformed support ticket data before SQL", async () => {
   const response = await worker.fetch(
     new Request("https://worker.example/v1/tickets", {
       method: "POST",
-      headers: { Authorization: \`Bearer \${token}\`, "Content-Type": "application/json" },
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
       body: JSON.stringify({ guild_id: "bad" }),
     }),
     { DB, BOT_API_TOKEN: token },
@@ -170,7 +170,7 @@ test("ticket statistics are scoped to one guild", async () => {
   const token = "j".repeat(48);
   const response = await worker.fetch(
     new Request("https://worker.example/v1/tickets/stats?guild_id=123456789012345678", {
-      headers: { Authorization: \`Bearer \${token}\` },
+      headers: { Authorization: `Bearer ${token}` },
     }),
     { DB, BOT_API_TOKEN: token },
   );
@@ -186,7 +186,7 @@ test("assigns an open support ticket with assignment audit fields", async () => 
   const response = await worker.fetch(
     new Request("https://worker.example/v1/tickets/channel/223456789012345678/assign", {
       method: "PATCH",
-      headers: { Authorization: \`Bearer \${token}\`, "Content-Type": "application/json" },
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
       body: JSON.stringify({
         assigned_to: "423456789012345678",
         assigned_by: "323456789012345678",
@@ -209,7 +209,7 @@ test("closes an open support ticket and records the closing actor", async () => 
   const response = await worker.fetch(
     new Request("https://worker.example/v1/tickets/channel/223456789012345678/close", {
       method: "PATCH",
-      headers: { Authorization: \`Bearer \${token}\`, "Content-Type": "application/json" },
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
       body: JSON.stringify({
         closed_by: "323456789012345678",
         closed_at: "2026-11-18T13:00:00",
