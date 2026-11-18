@@ -78,7 +78,7 @@ def register_ticket_commands(tree, database_provider, support_only, audit_record
             ephemeral=True,
         )
 
-    @tree.command(name="ticketactivity", description="View the persistent activity timeline for a support ticket")
+    @tree.command(name="ticketactivity", description="View staff notes and priority history for a support ticket")
     @app_commands.describe(channel="Support ticket to inspect")
     @app_commands.guild_only()
     @support_only()
@@ -93,7 +93,7 @@ def register_ticket_commands(tree, database_provider, support_only, audit_record
             return
         embed = discord.Embed(
             title="VANTA  /  TICKET ACTIVITY",
-            description=f"Persistent staff activity for {channel.mention}",
+            description=f"Staff-only notes and priority history for {channel.mention}",
             color=0x3978F6,
         )
         if not events:
