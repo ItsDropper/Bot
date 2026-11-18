@@ -49,6 +49,11 @@ class ModerationServiceTests(unittest.IsolatedAsyncioTestCase):
             await self.service.complete_case(7, status="pending")
         self.database.complete_moderation_case.assert_not_awaited()
 
+    async def test_complete_case_rejects_invalid_timestamp(self):
+        with self.assertRaises(ValueError):
+            await self.service.complete_case(7, status="applied", completed_at="not-a-date")
+        self.database.complete_moderation_case.assert_not_awaited()
+
     async def test_list_cases_enforces_page_bounds(self):
         self.assertEqual(
             await self.service.list_cases("123456789012345678", limit=5),
