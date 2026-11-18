@@ -261,7 +261,7 @@ async function handle(request, env) {
     return json({ case: caseRow }, 201);
   }
 
-  const moderationCaseMatch = path.match(/^\\/v1\\/moderation\\/cases\\/([0-9]{1,12})$/);
+  const moderationCaseMatch = path.match(/^\/v1\/moderation\/cases\/([0-9]{1,12})$/);
   if (moderationCaseMatch && request.method === "PATCH") {
     let body;
     try { body = await readJson(request); } catch { return json({ error: "Invalid JSON request body" }, 400); }
