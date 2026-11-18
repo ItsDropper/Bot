@@ -485,8 +485,10 @@ async def _announce_latest_launcher_release(guild: discord.Guild) -> str:
     if channel is None:
         try:
             channel = await guild.fetch_channel(announcement_channel_id)
-        except (discord.NotFound, discord.Forbidden):
-            return "announcement channel unavailable"
+        except (discord.NotFound, discord.Forbidden, discord.InvalidData):
+            # A configured/default channel may belong to a different guild when this
+            # bot is installed in multiple servers. Never let that break startup or sync.
+            return "announcement channel is unavailable in this server"
     if not isinstance(channel, discord.TextChannel):
         return "announcement destination is not a text channel"
 
@@ -617,14 +619,43 @@ class Client(discord.Client):
         await self.wait_until_ready()
 
     async def on_ready(self):
-        for guild in self.guilds:
-            tree.copy_global_to(guild=guild)
-            await tree.sync(guild=guild)
-            await reconcile_ticket_close_controls(guild)
-            result = await announce_latest_launcher_release(guild)
-            print(f"Initial launcher release check ({guild.id}): {result}")
         print(f"Logged in as {self.user} (ID: {self.user.id})")
-        print(f"Commands synced to {len(self.guilds)} guild(s).")
+        synced_guilds = 0
+        for guild in self.guilds:
+            # Keep each guild's sync independent: one malformed/permission-limited
+            # guild must not prevent command registration in the remaining servers.
+            try:
+                tree.copy_global_to(guild=guild)
+                synced = await tree.sync(guild=guild)
+                synced_guilds += 1
+                command_names = ", ".join(sorted(command.name for command in synced))
+                print(
+                    f"Slash commands synced for {guild.name} ({guild.id}): "
+                    f"{len(synced)} command(s) [{command_names}]"
+                )
+            except Exception as exc:
+                print(
+                    f"Slash command sync failed for {guild.name} ({guild.id}): "
+                    f"{type(exc).__name__}: {exc}"
+                )
+                import traceback
+                traceback.print_exc()
+                continue
+
+            try:
+                await reconcile_ticket_close_controls(guild)
+            except Exception as exc:
+                print(f"Ticket control reconciliation failed in {guild.id}: {type(exc).__name__}: {exc}")
+
+            try:
+                result = await announce_latest_launcher_release(guild)
+                print(f"Initial launcher release check ({guild.id}): {result}")
+            except Exception as exc:
+                # Announcement delivery is optional and must never interfere with
+                # application-command availability.
+                print(f"Initial launcher release check failed ({guild.id}): {type(exc).__name__}: {exc}")
+
+        print(f"Slash command sync completed for {synced_guilds}/{len(self.guilds)} guild(s).")
 
 async def reconcile_ticket_close_controls(guild: discord.Guild):
     """Replace old ticket messages that exposed both close controls with one control."""
