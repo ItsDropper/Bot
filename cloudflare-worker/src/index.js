@@ -85,8 +85,11 @@ async function handle(request, env) {
           "ON CONFLICT(discord_id) DO UPDATE SET " +
           "mc_username = excluded.mc_username, linked_at = excluded.linked_at"
         ).bind(discordId, username, linkedAt).run();
-      } catch {
-        return json({ error: "Minecraft username is already linked to another Discord account" }, 409);
+      } catch (error) {
+        if (/unique constraint failed|constraint failed/i.test(String(error?.message || error))) {
+          return json({ error: "Minecraft username is already linked to another Discord account" }, 409);
+        }
+        throw error;
       }
 
       const link = await env.DB
