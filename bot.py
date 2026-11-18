@@ -902,7 +902,7 @@ class Client(discord.Client):
                         try:
                             await channel.send(content=support_role.mention if support_role else None, embed=embed,
                                 allowed_mentions=discord.AllowedMentions(roles=[support_role] if support_role else [], users=False, everyone=False))
-                            await database.mark_ticket_escalated(guild_id=str(guild.id), channel_id=str(channel.id), escalated_at=now.isoformat() + "Z")
+                            await database.mark_ticket_escalated(guild_id=str(guild.id), channel_id=str(channel.id), actor_id=str(self.user.id), escalated_at=now.isoformat() + "Z")
                         except (discord.Forbidden, discord.HTTPException, DatabaseError) as exc:
                             print(f"Ticket escalation failed for {guild.id}/{channel.id}: {type(exc).__name__}: {exc}")
                     offset += len(tickets)
