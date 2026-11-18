@@ -121,5 +121,38 @@ class CloudflareDatabaseTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(session.calls[0][2]["json"]["assigned_by"], "323456789012345678")
 
 
+    async def test_guild_config_update_and_read(self):
+        client, session = self.make_client(200, {"config": {"guild_id": "123456789012345678"}})
+        result = await client.update_guild_config(
+            "123456789012345678", updated_by="323456789012345678",
+            updated_at="2026-11-18T12:00:00", support_role_id="423456789012345678",
+        )
+        self.assertEqual(result["guild_id"], "123456789012345678")
+        self.assertEqual(session.calls[0][0], "PUT")
+        self.assertEqual(session.calls[0][2]["json"]["support_role_id"], "423456789012345678")
+
+    async def test_audit_event_is_append_only_post(self):
+        client, session = self.make_client(201, {"event_id": 7})
+        event_id = await client.append_audit_event(
+            guild_id="123456789012345678", actor_id="323456789012345678",
+            action="ticket.created", target_id="223456789012345678",
+            details={"owner_id": "323456789012345678"}, created_at="2026-11-18T12:00:00",
+        )
+        self.assertEqual(event_id, 7)
+        self.assertEqual(session.calls[0][0], "POST")
+        self.assertEqual(session.calls[0][2]["json"]["action"], "ticket.created")
+
+    async def test_audit_listing_is_bounded(self):
+        client, session = self.make_client(200, {"events": [{"action": "ticket.created"}]})
+        events = await client.list_audit_events("123456789012345678", limit=15)
+        self.assertEqual(events[0]["action"], "ticket.created")
+        self.assertIn("limit=15", session.calls[0][1])
+
+    async def test_audit_listing_rejects_unbounded_page(self):
+        client, session = self.make_client(200, {"events": []})
+        with self.assertRaises(ValueError):
+            await client.list_audit_events("123456789012345678", limit=26)
+        self.assertEqual(session.calls, [])
+
 if __name__ == "__main__":
     unittest.main()
