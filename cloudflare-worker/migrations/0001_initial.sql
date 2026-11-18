@@ -6,5 +6,3 @@ CREATE TABLE IF NOT EXISTS minecraft_links (
     linked_at TEXT NOT NULL
 );
 
-CREATE INDEX IF NOT EXISTS idx_minecraft_links_username
-    ON minecraft_links (mc_username COLLATE NOCASE);
