@@ -615,7 +615,7 @@ test("records ticket message metadata and sets first staff response", async () =
   );
   assert.equal(response.status, 200);
   assert.match(DB.calls[0].sql, /first_response_at = CASE/);
-  assert.match(DB.calls[1].sql, /'staff_reply'/);
+  assert.equal(DB.calls[1].values[1], "staff_reply");
   assert.deepEqual(DB.calls[0].values, ["2026-11-18T14:00:00Z", "staff", "2026-11-18T14:00:00Z", "staff", "2026-11-18T14:00:00Z", "staff", "2026-11-18T14:00:00Z", "staff", "123456789012345678", "223456789012345678"]);
 });
 
