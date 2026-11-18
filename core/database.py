@@ -205,12 +205,14 @@ class CloudflareDatabase:
         )
         return result["ticket"]
 
-    async def mark_ticket_escalated(self, *, guild_id: str, channel_id: str, escalated_at: str):
-        if any(not re.fullmatch(r"[0-9]{15,22}", str(value)) for value in (guild_id, channel_id)):
+    async def mark_ticket_escalated(self, *, guild_id: str, channel_id: str,
+                                    actor_id: str, escalated_at: str):
+        identifiers = (guild_id, channel_id, actor_id)
+        if any(not re.fullmatch(r"[0-9]{15,22}", str(value)) for value in identifiers):
             raise ValueError("Invalid ticket escalation identifiers")
         result = await self._request(
             "POST", f"/v1/tickets/channel/{quote(str(channel_id), safe='')}/escalations",
-            payload={"guild_id": str(guild_id), "escalated_at": escalated_at},
+            payload={"guild_id": str(guild_id), "actor_id": str(actor_id), "escalated_at": escalated_at},
         )
         return result["ticket"]
 
