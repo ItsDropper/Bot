@@ -40,7 +40,7 @@ def main():
     if not token:
         raise SystemExit("CLOUDFLARE_API_TOKEN is required")
 
-    endpoint = f"https://api.cloudflare.com/client/v4/accounts/{account_id}/d1/database"
+    endpoint = f"https://api.cloudflare.com/client/v4/accounts/{account_id}/d1/database?page=1&per_page=100"
     databases = api_request("GET", endpoint, token)
     database = next((item for item in databases if item.get("name") == name), None)
     if database is None:
