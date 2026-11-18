@@ -191,6 +191,29 @@ class CloudflareDatabase:
 
 
 
+    async def record_ticket_message(self, *, guild_id: str, channel_id: str, actor_id: str,
+                                    actor_type: str, created_at: str):
+        if actor_type not in {"customer", "staff"}:
+            raise ValueError("Invalid ticket message actor type")
+        identifiers = (guild_id, channel_id, actor_id)
+        if any(not re.fullmatch(r"[0-9]{15,22}", str(value)) for value in identifiers):
+            raise ValueError("Invalid ticket message identifiers")
+        result = await self._request(
+            "POST", f"/v1/tickets/channel/{quote(str(channel_id), safe='')}/messages",
+            payload={"guild_id": str(guild_id), "actor_id": str(actor_id),
+                     "actor_type": actor_type, "created_at": created_at},
+        )
+        return result["ticket"]
+
+    async def mark_ticket_escalated(self, *, guild_id: str, channel_id: str, escalated_at: str):
+        if any(not re.fullmatch(r"[0-9]{15,22}", str(value)) for value in (guild_id, channel_id)):
+            raise ValueError("Invalid ticket escalation identifiers")
+        result = await self._request(
+            "POST", f"/v1/tickets/channel/{quote(str(channel_id), safe='')}/escalations",
+            payload={"guild_id": str(guild_id), "escalated_at": escalated_at},
+        )
+        return result["ticket"]
+
     async def get_guild_config(self, guild_id: str):
         result = await self._request("GET", f"/v1/guilds/{quote(str(guild_id), safe='')}/config")
         return result.get("config")
