@@ -202,6 +202,40 @@ class CloudflareDatabase:
         return result["events"]
 
 
+
+    async def create_moderation_case(self, *, guild_id: str, target_id: str,
+                                     moderator_id: str, action: str, reason: str,
+                                     created_at: str, expires_at: str | None = None):
+        result = await self._request("POST", "/v1/moderation/cases", payload={
+            "guild_id": str(guild_id), "target_id": str(target_id),
+            "moderator_id": str(moderator_id), "action": action,
+            "reason": reason, "created_at": created_at, "expires_at": expires_at,
+        })
+        return result["case"]
+
+    async def complete_moderation_case(self, case_id: int, *, status: str,
+                                        completed_at: str, failure_reason: str | None = None):
+        result = await self._request(
+            "PATCH", f"/v1/moderation/cases/{int(case_id)}",
+            payload={"status": status, "completed_at": completed_at,
+                     "failure_reason": failure_reason},
+        )
+        return result["case"]
+
+    async def list_moderation_cases(self, guild_id: str, *, target_id: str | None = None,
+                                    limit: int = 10, offset: int = 0):
+        if not re.fullmatch(r"[0-9]{15,22}", str(guild_id)):
+            raise ValueError("Invalid moderation guild ID")
+        if target_id is not None and not re.fullmatch(r"[0-9]{15,22}", str(target_id)):
+            raise ValueError("Invalid moderation target ID")
+        if not 1 <= limit <= 25 or not 0 <= offset <= 1_000_000:
+            raise ValueError("Invalid moderation case pagination")
+        params = f"guild_id={quote(str(guild_id), safe='')}&limit={limit}&offset={offset}"
+        if target_id:
+            params += f"&target_id={quote(str(target_id), safe='')}"
+        result = await self._request("GET", f"/v1/moderation/cases?{params}")
+        return result["cases"], result["total"]
+
     async def get_release_announcement(self, guild_id: str, project: str, release_tag: str):
         path = (
             f"/v1/releases/{quote(str(guild_id), safe='')}/"
