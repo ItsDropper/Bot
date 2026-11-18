@@ -172,6 +172,47 @@ class CloudflareDatabaseTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(session.calls[0][1].endswith("/v1/releases/123456789012345678/launcher/v1.3.3"))
 
 
+
+    async def test_add_ticket_note_uses_private_notes_endpoint(self):
+        client, session = self.make_client(201, {"event": {"event_id": 9}})
+        result = await client.add_ticket_note(
+            guild_id="123456789012345678", channel_id="223456789012345678",
+            actor_id="323456789012345678", note="Check logs",
+            created_at="2026-11-18T12:00:00Z",
+        )
+        self.assertEqual(result["event_id"], 9)
+        self.assertTrue(session.calls[0][1].endswith("/notes"))
+        self.assertEqual(session.calls[0][2]["json"]["note"], "Check logs")
+
+    async def test_ticket_priority_is_persisted(self):
+        client, session = self.make_client(200, {"ticket": {"priority": "urgent"}})
+        result = await client.set_ticket_priority(
+            guild_id="123456789012345678", channel_id="223456789012345678",
+            actor_id="323456789012345678", priority="urgent",
+            created_at="2026-11-18T12:00:00Z",
+        )
+        self.assertEqual(result["priority"], "urgent")
+        self.assertEqual(session.calls[0][0], "PATCH")
+        self.assertTrue(session.calls[0][1].endswith("/priority"))
+
+    async def test_ticket_priority_rejects_invalid_value_locally(self):
+        client, session = self.make_client(200, {"ticket": {}})
+        with self.assertRaises(ValueError):
+            await client.set_ticket_priority(
+                guild_id="123456789012345678", channel_id="223456789012345678",
+                actor_id="323456789012345678", priority="critical",
+                created_at="2026-11-18T12:00:00Z",
+            )
+        self.assertEqual(session.calls, [])
+
+    async def test_ticket_activity_listing_uses_guild_scoped_endpoint(self):
+        client, session = self.make_client(200, {"events": [{"action": "internal_note"}]})
+        events = await client.list_ticket_activity(
+            guild_id="123456789012345678", channel_id="223456789012345678", limit=10,
+        )
+        self.assertEqual(events[0]["action"], "internal_note")
+        self.assertIn("guild_id=123456789012345678", session.calls[0][1])
+
     async def test_create_moderation_case_persists_pending_record(self):
         case = {"case_id": 41, "action": "warn", "status": "pending"}
         client, session = self.make_client(201, {"case": case})
