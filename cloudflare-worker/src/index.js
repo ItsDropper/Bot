@@ -236,6 +236,51 @@ async function handle(request, env) {
     return json({ events: rows.results || [] });
   }
 
+  const ticketMessageMatch = path.match(/^\\/v1\\/tickets\\/channel\\/([0-9]{15,22})\\/messages$/);
+  if (ticketMessageMatch && request.method === "POST") {
+    let body;
+    try { body = await readJson(request); } catch { return json({ error: "Invalid JSON request body" }, 400); }
+    const validId = value => typeof value === "string" && /^[0-9]{15,22}$/.test(value);
+    if (!validId(body?.guild_id) || !validId(body?.actor_id) || !["customer", "staff"].includes(body?.actor_type) ||
+        typeof body?.created_at !== "string" || !Number.isFinite(Date.parse(body.created_at))) {
+      return json({ error: "Invalid ticket message activity" }, 400);
+    }
+    const action = body.actor_type === "staff" ? "staff_reply" : "customer_message";
+    const update = env.DB.prepare(
+      "UPDATE support_tickets SET last_activity_at = ?, " +
+      "last_customer_message_at = CASE WHEN ? = 'customer' THEN ? ELSE last_customer_message_at END, " +
+      "last_staff_message_at = CASE WHEN ? = 'staff' THEN ? ELSE last_staff_message_at END, " +
+      "first_response_at = CASE WHEN ? = 'staff' THEN COALESCE(first_response_at, ?) ELSE first_response_at END, " +
+      "last_escalated_at = CASE WHEN ? = 'customer' THEN NULL ELSE last_escalated_at END " +
+      "WHERE guild_id = ? AND channel_id = ? AND status = 'open'"
+    ).bind(body.created_at, body.actor_type, body.created_at, body.actor_type, body.created_at,
+      body.actor_type, body.created_at, body.actor_type, body.guild_id, ticketMessageMatch[1]);
+    const activity = env.DB.prepare(
+      "INSERT INTO support_ticket_activity (ticket_id, guild_id, channel_id, actor_id, action, details, created_at) " +
+      "SELECT ticket_id, guild_id, channel_id, ?, ?, '{}', ? FROM support_tickets " +
+      "WHERE guild_id = ? AND channel_id = ? AND status = 'open'"
+    ).bind(body.actor_id, action, body.created_at, body.guild_id, ticketMessageMatch[1]);
+    const results = await env.DB.batch([update, activity]);
+    if (!results[0]?.meta?.changes) return json({ error: "Open ticket not found" }, 404);
+    const ticket = await env.DB.prepare("SELECT * FROM support_tickets WHERE guild_id = ? AND channel_id = ?").bind(body.guild_id, ticketMessageMatch[1]).first();
+    return json({ ticket });
+  }
+
+  const ticketEscalationMatch = path.match(/^\\/v1\\/tickets\\/channel\\/([0-9]{15,22})\\/escalations$/);
+  if (ticketEscalationMatch && request.method === "POST") {
+    let body;
+    try { body = await readJson(request); } catch { return json({ error: "Invalid JSON request body" }, 400); }
+    if (typeof body?.guild_id !== "string" || !/^[0-9]{15,22}$/.test(body.guild_id) ||
+        typeof body?.escalated_at !== "string" || !Number.isFinite(Date.parse(body.escalated_at))) {
+      return json({ error: "Invalid ticket escalation metadata" }, 400);
+    }
+    const result = await env.DB.prepare(
+      "UPDATE support_tickets SET last_escalated_at = ? WHERE guild_id = ? AND channel_id = ? AND status = 'open' AND last_escalated_at IS NULL"
+    ).bind(body.escalated_at, body.guild_id, ticketEscalationMatch[1]).run();
+    if (!result.meta?.changes) return json({ error: "Ticket not found or already escalated" }, 409);
+    const ticket = await env.DB.prepare("SELECT * FROM support_tickets WHERE guild_id = ? AND channel_id = ?").bind(body.guild_id, ticketEscalationMatch[1]).first();
+    return json({ ticket });
+  }
   const ticketNoteMatch = path.match(/^\/v1\/tickets\/channel\/([0-9]{15,22})\/notes$/);
   if (ticketNoteMatch && request.method === "POST") {
     let body;
