@@ -126,3 +126,55 @@ test("rejects invalid Minecraft-link pagination", async () => {
   assert.equal(response.status, 400);
   assert.equal(DB.calls.length, 0);
 });
+
+
+test("creates a support ticket using bound values", async () => {
+  const DB = fakeDb({ ticket_id: "123:456", status: "open" });
+  const token = "h".repeat(48);
+  const response = await worker.fetch(
+    new Request("https://worker.example/v1/tickets", {
+      method: "POST",
+      headers: { Authorization: \`Bearer \${token}\`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        ticket_id: "123:456", guild_id: "123456789012345678",
+        channel_id: "223456789012345678", owner_id: "323456789012345678",
+        reason: "Launcher crash", created_at: "2026-11-18T10:00:00",
+      }),
+    }),
+    { DB, BOT_API_TOKEN: token },
+  );
+  assert.equal(response.status, 201);
+  assert.deepEqual(DB.calls[0].values, [
+    "123:456", "123456789012345678", "223456789012345678",
+    "323456789012345678", "Launcher crash", "2026-11-18T10:00:00",
+  ]);
+});
+
+test("rejects malformed support ticket data before SQL", async () => {
+  const DB = fakeDb();
+  const token = "i".repeat(48);
+  const response = await worker.fetch(
+    new Request("https://worker.example/v1/tickets", {
+      method: "POST",
+      headers: { Authorization: \`Bearer \${token}\`, "Content-Type": "application/json" },
+      body: JSON.stringify({ guild_id: "bad" }),
+    }),
+    { DB, BOT_API_TOKEN: token },
+  );
+  assert.equal(response.status, 400);
+  assert.equal(DB.calls.length, 0);
+});
+
+test("ticket statistics are scoped to one guild", async () => {
+  const DB = fakeDb({ total: 9, open: 2, closed: 7 });
+  const token = "j".repeat(48);
+  const response = await worker.fetch(
+    new Request("https://worker.example/v1/tickets/stats?guild_id=123456789012345678", {
+      headers: { Authorization: \`Bearer \${token}\` },
+    }),
+    { DB, BOT_API_TOKEN: token },
+  );
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), { stats: { total: 9, open: 2, closed: 7 } });
+  assert.deepEqual(DB.calls[0].values, ["123456789012345678"]);
+});
