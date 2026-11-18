@@ -16,11 +16,12 @@ Create these three secrets:
 | `CLOUDFLARE_API_TOKEN` | Cloudflare API token described below |
 | `CLOUDFLARE_BOT_API_TOKEN` | A long random secret shared only with the Worker and Render bot |
 
-Create the Cloudflare API token in the Cloudflare dashboard under **My Profile → API Tokens**. Use a custom token scoped to the relevant account with:
-- **D1: Edit**
-- **Workers Scripts: Edit**
+Create an account API token in the Cloudflare dashboard. Scope it to the account that will host Vanta's database and Worker. It needs:
+- **D1: Edit** to find/create the D1 database.
+- **Workers Admin** at the Workers product scope for the initial creation of the new Worker. Cloudflare requires Admin access to create a Worker; after the first successful deployment, you can reduce this to **Workers Editor** for subsequent deployments.
+- **Account Settings: Read** if required by Wrangler's account metadata checks.
 
-Restrict the token to your Cloudflare account. It is used only by GitHub Actions to provision D1, apply migrations, set the Worker secret, and deploy the Worker. It is not needed by the running bot.
+Do not use your Global API Key. The token is used only by GitHub Actions to provision D1, apply migrations, set the Worker secret, and deploy the Worker. It is not needed by the running bot. Cloudflare documents the separate create-versus-update permission requirements in its [Workers authorization guide](https://developers.cloudflare.com/workers/authorization/).
 
 Generate the bot-to-Worker secret locally, for example in PowerShell:
 
