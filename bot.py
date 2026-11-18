@@ -686,6 +686,8 @@ async def validate_mc_username(username: str):
     Handles every failure path: 404 (not found), non-200, timeout, network error,
     and bad JSON — so callers never need to try/except this.
     """
+    if not re.fullmatch(r"[A-Za-z0-9_]{1,16}", username):
+        return False, "Enter a valid Minecraft username (1–16 letters, numbers or underscores)."
     try:
         import aiohttp
         url = f"https://api.mojang.com/users/profiles/minecraft/{username}"
