@@ -667,6 +667,10 @@ async def on_guild_join(guild):
 async def on_app_command_error(interaction: discord.Interaction, error: app_commands.AppCommandError):
     # Unwrap CheckFailure — permission checks already send their own message
     if isinstance(error, app_commands.CheckFailure):
+        if not interaction.response.is_done():
+            await interaction.response.send_message(
+                "You do not have permission to use this command.", ephemeral=True
+            )
         return
 
     # Log to console
