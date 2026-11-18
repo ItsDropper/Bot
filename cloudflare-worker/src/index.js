@@ -199,8 +199,13 @@ async function handle(request, env) {
     if (ownerId) { clauses.push("owner_id = ?"); values.push(ownerId); }
     if (status !== "all") { clauses.push("status = ?"); values.push(status); }
     const where = clauses.join(" AND ");
+    // Open-ticket pages must be globally priority ordered before LIMIT/OFFSET;
+    // sorting only in the Discord command would hide urgent tickets on later pages.
+    const orderBy = status === "open"
+      ? "CASE priority WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'normal' THEN 2 WHEN 'low' THEN 3 ELSE 2 END ASC, created_at ASC"
+      : "created_at DESC";
     const [rows, count] = await Promise.all([
-      env.DB.prepare("SELECT * FROM support_tickets WHERE " + where + " ORDER BY created_at DESC LIMIT ? OFFSET ?").bind(...values, limit, offset).all(),
+      env.DB.prepare("SELECT * FROM support_tickets WHERE " + where + " ORDER BY " + orderBy + " LIMIT ? OFFSET ?").bind(...values, limit, offset).all(),
       env.DB.prepare("SELECT COUNT(*) AS total FROM support_tickets WHERE " + where).bind(...values).first(),
     ]);
     return json({ tickets: rows.results || [], total: count.total || 0 });
