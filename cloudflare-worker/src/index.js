@@ -78,6 +78,62 @@ async function handle(request, env) {
     return json({ links: rows.results || [], total: count.total || 0 });
   }
 
+  if (path === "/v1/tickets" && request.method === "POST") {
+    let body;
+    try { body = await readJson(request); } catch { return json({ error: "Invalid JSON request body" }, 400); }
+    const { ticket_id, guild_id, channel_id, owner_id, reason, created_at } = body || {};
+    const validId = value => typeof value === "string" && /^[0-9]{15,22}$/.test(value);
+    if (typeof ticket_id !== "string" || ticket_id.length > 64 || !validId(guild_id) || !validId(channel_id) || !validId(owner_id) || typeof reason !== "string" || !reason.trim() || reason.length > 1000 || typeof created_at !== "string" || !Number.isFinite(Date.parse(created_at))) return json({ error: "Invalid ticket data" }, 400);
+    try {
+      await env.DB.prepare("INSERT INTO support_tickets (ticket_id, guild_id, channel_id, owner_id, reason, status, created_at) VALUES (?, ?, ?, ?, ?, 'open', ?)").bind(ticket_id, guild_id, channel_id, owner_id, reason.trim(), created_at).run();
+    } catch (error) {
+      if (/unique constraint failed|constraint failed/i.test(String(error?.message || error))) return json({ error: "This member already has an open ticket or the ticket already exists" }, 409);
+      throw error;
+    }
+    const ticket = await env.DB.prepare("SELECT * FROM support_tickets WHERE ticket_id = ?").bind(ticket_id).first();
+    return json({ ticket }, 201);
+  }
+
+  if (path === "/v1/tickets" && request.method === "GET") {
+    const url = new URL(request.url);
+    const guildId = url.searchParams.get("guild_id") || "";
+    const ownerId = url.searchParams.get("owner_id") || "";
+    const status = url.searchParams.get("status") || "all";
+    const limit = Number(url.searchParams.get("limit") || 10);
+    const offset = Number(url.searchParams.get("offset") || 0);
+    const validId = value => /^[0-9]{15,22}$/.test(value);
+    if (!validId(guildId) || (ownerId && !validId(ownerId)) || !["all", "open", "closed"].includes(status) || !Number.isInteger(limit) || limit < 1 || limit > 25 || !Number.isInteger(offset) || offset < 0 || offset > 1000000) return json({ error: "Invalid ticket query parameters" }, 400);
+    const clauses = ["guild_id = ?"]; const values = [guildId];
+    if (ownerId) { clauses.push("owner_id = ?"); values.push(ownerId); }
+    if (status !== "all") { clauses.push("status = ?"); values.push(status); }
+    const where = clauses.join(" AND ");
+    const [rows, count] = await Promise.all([
+      env.DB.prepare("SELECT * FROM support_tickets WHERE " + where + " ORDER BY created_at DESC LIMIT ? OFFSET ?").bind(...values, limit, offset).all(),
+      env.DB.prepare("SELECT COUNT(*) AS total FROM support_tickets WHERE " + where).bind(...values).first(),
+    ]);
+    return json({ tickets: rows.results || [], total: count.total || 0 });
+  }
+
+  if (path === "/v1/tickets/stats" && request.method === "GET") {
+    const guildId = new URL(request.url).searchParams.get("guild_id") || "";
+    if (!/^[0-9]{15,22}$/.test(guildId)) return json({ error: "Invalid guild ID" }, 400);
+    const stats = await env.DB.prepare("SELECT COUNT(*) AS total, SUM(CASE WHEN status = 'open' THEN 1 ELSE 0 END) AS open, SUM(CASE WHEN status = 'closed' THEN 1 ELSE 0 END) AS closed FROM support_tickets WHERE guild_id = ?").bind(guildId).first();
+    return json({ stats: { total: stats.total || 0, open: stats.open || 0, closed: stats.closed || 0 } });
+  }
+
+  const closeTicketMatch = path.match(/^\/v1\/tickets\/channel\/([0-9]{15,22})\/close$/);
+  if (closeTicketMatch && request.method === "PATCH") {
+    let body;
+    try { body = await readJson(request); } catch { return json({ error: "Invalid JSON request body" }, 400); }
+    if (typeof body?.closed_by !== "string" || !/^[0-9]{15,22}$/.test(body.closed_by) || typeof body?.closed_at !== "string" || !Number.isFinite(Date.parse(body.closed_at))) return json({ error: "Invalid ticket closure data" }, 400);
+    const existing = await env.DB.prepare("SELECT * FROM support_tickets WHERE channel_id = ?").bind(closeTicketMatch[1]).first();
+    if (!existing) return json({ error: "Ticket not found" }, 404);
+    if (existing.status !== "open") return json({ error: "Ticket is already closed" }, 409);
+    await env.DB.prepare("UPDATE support_tickets SET status = 'closed', closed_at = ?, closed_by = ? WHERE channel_id = ? AND status = 'open'").bind(body.closed_at, body.closed_by, closeTicketMatch[1]).run();
+    const ticket = await env.DB.prepare("SELECT * FROM support_tickets WHERE channel_id = ?").bind(closeTicketMatch[1]).first();
+    return json({ ticket });
+  }
+
   const discordMatch = path.match(/^\/v1\/minecraft-links\/discord\/([0-9]{15,22})$/);
   if (discordMatch) {
     const discordId = discordMatch[1];
