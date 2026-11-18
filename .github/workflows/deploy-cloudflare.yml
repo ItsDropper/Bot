@@ -77,14 +77,14 @@ jobs:
             echo "## Cloudflare Worker deployed"
             echo
             if [ -n "$WORKER_URL" ]; then
-              echo "Set `CLOUDFLARE_WORKER_URL` in your Render service to:"
+              echo "Set CLOUDFLARE_WORKER_URL in your Render service to:"
               echo
-              echo "`$WORKER_URL`"
+              echo "$WORKER_URL"
             else
-              echo "Deployment succeeded. Copy the `.workers.dev` URL from the deploy step logs and set it as `CLOUDFLARE_WORKER_URL` in Render."
+              echo "Deployment succeeded. Copy the .workers.dev URL from the deploy step logs and set it as CLOUDFLARE_WORKER_URL in Render."
             fi
             echo
-            echo "Also set `CLOUDFLARE_BOT_API_TOKEN` in Render to the same GitHub secret used for the Worker secret."
+            echo "Also set CLOUDFLARE_BOT_API_TOKEN in Render to the same GitHub secret used for the Worker secret."
             echo
             echo "The Discord bot remains hosted on Render. This workflow deploys only the database API Worker."
           } >> "$GITHUB_STEP_SUMMARY"
