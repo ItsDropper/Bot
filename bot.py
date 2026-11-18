@@ -1147,12 +1147,12 @@ async def botdashboard(interaction: discord.Interaction):
     )
     embed.add_field(
         name="Platform status",
-        value=f"**Discord:** Connected\\n**D1:** {'Healthy' if database_ok else 'Degraded'}\\n**Gateway latency:** {round(client.latency * 1000)} ms",
+        value=f"**Discord:** Connected\n**D1:** {'Healthy' if database_ok else 'Degraded'}\n**Gateway latency:** {round(client.latency * 1000)} ms",
         inline=True,
     )
     embed.add_field(
         name="Support operations",
-        value=f"**Total:** {ticket_stats['total']:,}\\n**Open:** {ticket_stats['open']:,}\\n**Closed:** {ticket_stats['closed']:,}",
+        value=f"**Total:** {ticket_stats['total']:,}\n**Open:** {ticket_stats['open']:,}\n**Closed:** {ticket_stats['closed']:,}",
         inline=True,
     )
     embed.add_field(
@@ -1163,7 +1163,7 @@ async def botdashboard(interaction: discord.Interaction):
     uptime = datetime.utcnow() - BOT_STARTED_AT
     hours, remainder = divmod(int(uptime.total_seconds()), 3600)
     minutes = remainder // 60
-    embed.add_field(name="Runtime", value=f"**Uptime:** {hours}h {minutes}m\\n**Guild:** {discord.utils.escape_markdown(interaction.guild.name)}", inline=False)
+    embed.add_field(name="Runtime", value=f"**Uptime:** {hours}h {minutes}m\n**Guild:** {discord.utils.escape_markdown(interaction.guild.name)}", inline=False)
     embed.set_author(name="VANTA  •  PLATFORM CONTROL")
     embed.set_footer(text=f"Requested by {interaction.user} · Metrics queried live from D1")
     embed.timestamp = datetime.utcnow()
