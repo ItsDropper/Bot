@@ -196,6 +196,7 @@ test("assigns an open support ticket with assignment audit fields", async () => 
       method: "PATCH",
       headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
       body: JSON.stringify({
+        guild_id: "123456789012345678",
         assigned_to: "423456789012345678",
         assigned_by: "323456789012345678",
         assigned_at: "2026-11-18T12:00:00",
@@ -204,10 +205,18 @@ test("assigns an open support ticket with assignment audit fields", async () => 
     { DB, BOT_API_TOKEN: token },
   );
   assert.equal(response.status, 200);
-  assert.deepEqual(DB.calls[1].values, [
+  assert.deepEqual(DB.calls[0].values, [
     "423456789012345678", "323456789012345678",
-    "2026-11-18T12:00:00", "223456789012345678",
+    "2026-11-18T12:00:00", "123456789012345678",
+    "223456789012345678",
   ]);
+  assert.deepEqual(DB.calls[1].values, [
+    "323456789012345678",
+    JSON.stringify({ assigned_to: "423456789012345678" }),
+    "2026-11-18T12:00:00", "123456789012345678",
+    "223456789012345678",
+  ]);
+  assert.deepEqual(DB.calls[2].values, ["123456789012345678", "223456789012345678"]);
 });
 
 
