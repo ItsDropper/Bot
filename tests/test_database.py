@@ -81,11 +81,6 @@ class CloudflareDatabaseTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(ValueError):
             CloudflareDatabase("http://public.example", "x" * 48)
 
-
-if __name__ == "__main__":
-    unittest.main()
-
-
     async def test_create_ticket_posts_persistent_record(self):
         client, session = self.make_client(201, {"ticket": {"ticket_id": "1:2"}})
         result = await client.create_support_ticket(
@@ -124,3 +119,7 @@ if __name__ == "__main__":
         self.assertEqual(result["assigned_to"], "423456789012345678")
         self.assertTrue(session.calls[0][1].endswith("/assign"))
         self.assertEqual(session.calls[0][2]["json"]["assigned_by"], "323456789012345678")
+
+
+if __name__ == "__main__":
+    unittest.main()
