@@ -43,6 +43,19 @@ async def init_db():
         await database.healthcheck()
     print("Cloudflare D1 connection verified.")
 
+async def record_audit(guild_id: int, actor_id: int, action: str, *, target_id=None, details=None):
+    """Persist an attributable operational event without masking the primary operation."""
+    try:
+        await database.append_audit_event(
+            guild_id=str(guild_id), actor_id=str(actor_id), action=action,
+            target_id=str(target_id) if target_id else None,
+            details=details or {}, created_at=datetime.utcnow().isoformat(),
+        )
+    except Exception as exc:
+        print(f"Audit persistence failed for {action} in guild {guild_id}: {type(exc).__name__}: {exc}")
+
+
+
 
 async def close_db():
     global database
@@ -202,6 +215,7 @@ class SupportTicketModal(discord.ui.Modal, title="Create Support Ticket"):
 
         ping = support_role.mention if support_role else "@support"
         await channel.send(content=ping, embed=embed, view=CloseSupportTicketView())
+        await record_audit(guild.id, interaction.user.id, "ticket.created", target_id=channel.id, details={"owner_id": str(interaction.user.id)})
         await interaction.followup.send(
             f"Ticket created: {channel.mention}", ephemeral=True
         )
@@ -846,17 +860,24 @@ async def sendapplication(interaction: discord.Interaction, channel: discord.Tex
         await interaction.response.send_message("You need Administrator permission to use this.", ephemeral=True)
         return
     embed = discord.Embed(
-        title="Join the Vanta Team",
+        title="VANTA  /  TEAM APPLICATIONS",
         description=(
-            "Want to help improve the Vanta community? Apply to join the staff team.\n\n"
-            "Staff help moderate the community, support Launcher and Client users, "
-            "and keep the server organized.\n\n"
-            "Applications are reviewed by the server administrators."
+            "### Build the community with us.\\n"
+            "Help users, improve the experience and support the Vanta ecosystem. "
+            "We are looking for thoughtful, reliable people who communicate clearly.\\n\\n"
+            "**What happens next**\\n"
+            "Submit the application below. The team reviews each submission and "
+            "will contact you when a decision has been made."
         ),
-        color=0x3978F6
+        color=0x3978F6,
     )
-    embed.set_image(url="https://i.imgur.com/MV0Xqr5.png")
-    embed.set_footer(text="Vanta • Staff Applications")
+    embed.add_field(name="🛡️  Community", value="Help keep the server welcoming, useful and well organized.", inline=True)
+    embed.add_field(name="🧰  Product support", value="Help users with Vanta Launcher and related projects.", inline=True)
+    embed.add_field(name="📋  Review process", value="Applications are reviewed by authorized staff.", inline=True)
+    embed.set_author(name="VANTA  •  COMMUNITY OPERATIONS")
+    embed.set_thumbnail(url="https://github.com/ItsDropper.png")
+    embed.set_footer(text="Vanta Staff  •  Applications are reviewed on an ongoing basis")
+    embed.timestamp = datetime.utcnow()
     await channel.send(embed=embed, view=ApplicationPanelView())
     await interaction.response.send_message(f"✅ Application panel sent to {channel.mention}.", ephemeral=True)
 
@@ -868,19 +889,25 @@ async def sendsupportpanel(interaction: discord.Interaction, channel: discord.Te
     channel = channel or interaction.channel
 
     embed = discord.Embed(
-        title="🎫  Support",
+        title="VANTA  /  SUPPORT CENTER",
         description=(
-            "Need help or have a question? Open a support ticket below and our "
-            "support team will get to you shortly.\n\n"
-            "**How it works:**\n"
-            "1️⃣  Click **Create Support Ticket** below\n"
-            "2️⃣  Tell us why you're opening a ticket\n"
-            "3️⃣  A member of support will join your ticket shortly"
+            "### How can we help?\\n"
+            "Get direct help from the Vanta team. Create a private support room and "
+            "keep the full conversation in one place.\\n\\n"
+            "**A simple, tracked workflow**\\n"
+            "1. Open a ticket using the button below\\n"
+            "2. Describe the issue and include relevant details\\n"
+            "3. Our support team will pick it up and respond in your ticket"
         ),
-        color=0x2B2D31
+        color=0x3978F6,
     )
-
-    embed.set_footer(text="Open a ticket to get started")
+    embed.add_field(name="🔒  Private by default", value="Only you and authorized support staff can view your ticket.", inline=True)
+    embed.add_field(name="🧭  Clear ownership", value="Staff can assign tickets so requests do not get lost.", inline=True)
+    embed.add_field(name="📚  Persistent history", value="Ticket records are retained for support operations.", inline=True)
+    embed.set_author(name="VANTA  •  COMMUNITY OPERATIONS")
+    embed.set_thumbnail(url="https://github.com/ItsDropper.png")
+    embed.set_footer(text="Vanta Support  •  Select Create Support Ticket to begin")
+    embed.timestamp = datetime.utcnow()
 
     await channel.send(embed=embed, view=SupportPanelView())
     await interaction.response.send_message(f"✅ Support panel sent to {channel.mention}!", ephemeral=True)
@@ -1009,6 +1036,86 @@ async def forceunlink(interaction: discord.Interaction, user: discord.Member):
 
 
 
+
+@tree.command(name="serverconfig", description="View or update this server's Vanta Bot configuration")
+@app_commands.describe(
+    support_category="Category where support tickets are created",
+    support_role="Role allowed to manage support tickets",
+    ticket_log_channel="Channel for ticket closure logs",
+    application_channel="Channel receiving staff applications",
+    launcher_channel="Channel for Vanta Launcher release announcements",
+    launcher_role="Role pinged for Launcher releases",
+)
+@app_commands.checks.has_permissions(administrator=True)
+async def serverconfig(
+    interaction: discord.Interaction,
+    support_category: discord.CategoryChannel = None,
+    support_role: discord.Role = None,
+    ticket_log_channel: discord.TextChannel = None,
+    application_channel: discord.TextChannel = None,
+    launcher_channel: discord.TextChannel = None,
+    launcher_role: discord.Role = None,
+):
+    await interaction.response.defer(ephemeral=True)
+    current = await database.get_guild_config(str(interaction.guild.id)) or {}
+    supplied = {
+        "support_category_id": support_category.id if support_category else None,
+        "support_role_id": support_role.id if support_role else None,
+        "ticket_log_channel_id": ticket_log_channel.id if ticket_log_channel else None,
+        "application_result_channel_id": application_channel.id if application_channel else None,
+        "launcher_announcement_channel_id": launcher_channel.id if launcher_channel else None,
+        "launcher_announcement_role_id": launcher_role.id if launcher_role else None,
+    }
+    changed = {key: str(value) for key, value in supplied.items() if value is not None}
+    if changed:
+        merged = {key: current.get(key) for key in supplied}
+        merged.update(changed)
+        await database.update_guild_config(
+            str(interaction.guild.id), updated_by=str(interaction.user.id),
+            updated_at=datetime.utcnow().isoformat(), **merged,
+        )
+        await record_audit(interaction.guild.id, interaction.user.id, "guild.config.updated",
+                           details={"fields": sorted(changed.keys())})
+        current = await database.get_guild_config(str(interaction.guild.id)) or {}
+    labels = [
+        ("Support category", "support_category_id"),
+        ("Support role", "support_role_id"),
+        ("Ticket log channel", "ticket_log_channel_id"),
+        ("Application channel", "application_result_channel_id"),
+        ("Launcher release channel", "launcher_announcement_channel_id"),
+        ("Launcher announcement role", "launcher_announcement_role_id"),
+    ]
+    lines = []
+    for label, key in labels:
+        raw = current.get(key)
+        rendered = f"<@&{raw}>" if key.endswith("role_id") and raw else f"<#{raw}>" if raw else "Not configured (legacy default may apply)"
+        lines.append(f"**{label}:** {rendered}")
+    embed = discord.Embed(title="VANTA  /  SERVER CONFIGURATION",
+                          description="\\n".join(lines), color=0x3978F6)
+    embed.set_footer(text="Only server administrators can view or change this configuration")
+    await interaction.followup.send(embed=embed, ephemeral=True)
+
+
+@tree.command(name="auditlog", description="View recent Vanta Bot operational audit events")
+@app_commands.describe(limit="Number of events to display (1–15)")
+@support_only()
+async def auditlog(interaction: discord.Interaction, limit: app_commands.Range[int, 1, 15] = 10):
+    await interaction.response.defer(ephemeral=True)
+    events = await database.list_audit_events(str(interaction.guild.id), limit=limit)
+    embed = discord.Embed(title="VANTA  /  AUDIT TRAIL", color=0x3978F6)
+    if not events:
+        embed.description = "No recorded operational events yet."
+    else:
+        lines = []
+        for event in events:
+            timestamp = int(datetime.fromisoformat(event["created_at"].replace("Z", "+00:00")).timestamp())
+            target = f" → <@{event['target_id']}>" if event.get("target_id") else ""
+            lines.append(f"<t:{timestamp}:R> **{discord.utils.escape_markdown(event['action'])}** · <@{event['actor_id']}>{target}")
+        embed.description = "\\n".join(lines)
+    embed.set_footer(text="Append-only operational events · Cloudflare D1")
+    await interaction.followup.send(embed=embed, ephemeral=True)
+
+
 @tree.command(name="ticketassign", description="Assign an open support ticket to a staff member")
 @app_commands.describe(channel="The support ticket channel", staff="Support staff member taking ownership")
 @support_only()
@@ -1031,6 +1138,7 @@ async def ticketassign(interaction: discord.Interaction, channel: discord.TextCh
     embed = discord.Embed(title="Ticket Assigned", description=f"This ticket is now assigned to {staff.mention}.", color=discord.Color.blurple())
     embed.set_footer(text=f"Assigned by {interaction.user} · {ticket['assigned_at'][:10]}")
     await channel.send(embed=embed)
+    await record_audit(interaction.guild.id, interaction.user.id, "ticket.assigned", target_id=channel.id, details={"assignee_id": str(staff.id)})
     await interaction.followup.send(f"Assigned {channel.mention} to {staff.mention}.", ephemeral=True)
 
 
