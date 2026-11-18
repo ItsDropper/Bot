@@ -863,6 +863,32 @@ async def forceunlink(interaction: discord.Interaction, user: discord.Member):
     await interaction.response.send_message(f"✅ Unlinked `{row['mc_username']}` from {user.mention}.", ephemeral=True)
 
 
+
+@tree.command(name="ticketassign", description="Assign an open support ticket to a staff member")
+@app_commands.describe(channel="The support ticket channel", staff="Support staff member taking ownership")
+@support_only()
+async def ticketassign(interaction: discord.Interaction, channel: discord.TextChannel, staff: discord.Member):
+    support_role = interaction.guild.get_role(SUPPORT_ROLE_ID)
+    if not staff.guild_permissions.administrator and (not support_role or support_role not in staff.roles):
+        await interaction.response.send_message("The assignee must be a support staff member or administrator.", ephemeral=True)
+        return
+    if not channel.name.startswith("support-"):
+        await interaction.response.send_message("Select an active support ticket channel.", ephemeral=True)
+        return
+    await interaction.response.defer(ephemeral=True)
+    try:
+        ticket = await database.assign_support_ticket(
+            str(channel.id), str(staff.id), str(interaction.user.id), datetime.utcnow().isoformat()
+        )
+    except DatabaseError as exc:
+        await interaction.followup.send(f"Could not assign ticket: {exc}", ephemeral=True)
+        return
+    embed = discord.Embed(title="Ticket Assigned", description=f"This ticket is now assigned to {staff.mention}.", color=discord.Color.blurple())
+    embed.set_footer(text=f"Assigned by {interaction.user} · {ticket['assigned_at'][:10]}")
+    await channel.send(embed=embed)
+    await interaction.followup.send(f"Assigned {channel.mention} to {staff.mention}.", ephemeral=True)
+
+
 @tree.command(name="ticketstats", description="Show persistent support ticket statistics")
 @support_only()
 async def ticketstats(interaction: discord.Interaction):
