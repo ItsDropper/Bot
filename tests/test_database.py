@@ -113,3 +113,14 @@ if __name__ == "__main__":
         )
         self.assertEqual((tickets, total), ([], 0))
         self.assertIn("owner_id=323456789012345678", session.calls[0][1])
+
+
+    async def test_ticket_assignment_records_staff_and_actor(self):
+        client, session = self.make_client(200, {"ticket": {"assigned_to": "423456789012345678"}})
+        result = await client.assign_support_ticket(
+            "223456789012345678", "423456789012345678",
+            "323456789012345678", "2026-11-18T12:00:00",
+        )
+        self.assertEqual(result["assigned_to"], "423456789012345678")
+        self.assertTrue(session.calls[0][1].endswith("/assign"))
+        self.assertEqual(session.calls[0][2]["json"]["assigned_by"], "323456789012345678")
