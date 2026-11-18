@@ -4,9 +4,10 @@ from core.database import CloudflareDatabase, MinecraftLinkConflict
 
 
 class FakeResponse:
-    def __init__(self, status, body):
+    def __init__(self, status, body, headers=None):
         self.status = status
         self.body = body
+        self.headers = headers or {}
 
     async def __aenter__(self):
         return self
@@ -22,12 +23,14 @@ class FakeSession:
     closed = False
 
     def __init__(self, response):
-        self.response = response
+        self.responses = list(response) if isinstance(response, list) else [response]
         self.calls = []
 
     def request(self, method, url, **kwargs):
         self.calls.append((method, url, kwargs))
-        return self.response
+        if len(self.responses) > 1:
+            return self.responses.pop(0)
+        return self.responses[0]
 
 
 class CloudflareDatabaseTests(unittest.IsolatedAsyncioTestCase):
@@ -212,6 +215,32 @@ class CloudflareDatabaseTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(events[0]["action"], "internal_note")
         self.assertIn("guild_id=123456789012345678", session.calls[0][1])
+
+
+    async def test_get_retries_transient_worker_errors(self):
+        from unittest.mock import AsyncMock, patch
+
+        client, session = self.make_client(503, {"error": "temporarily unavailable"})
+        session.responses = [
+            FakeResponse(503, {"error": "temporarily unavailable"}),
+            FakeResponse(200, {"ok": True}),
+        ]
+        with patch("core.database.asyncio.sleep", new_callable=AsyncMock) as sleep:
+            self.assertTrue(await client.healthcheck())
+        self.assertEqual(len(session.calls), 2)
+        sleep.assert_awaited_once()
+
+    async def test_write_requests_are_not_retried_without_idempotency_keys(self):
+        from core.database import DatabaseError
+
+        client, session = self.make_client(503, {"error": "temporarily unavailable"})
+        with self.assertRaises(DatabaseError):
+            await client.create_support_ticket(
+                ticket_id="1:2", guild_id="123456789012345678",
+                channel_id="223456789012345678", owner_id="323456789012345678",
+                reason="Launcher crash", created_at="2026-11-18T10:00:00",
+            )
+        self.assertEqual(len(session.calls), 1)
 
     async def test_create_moderation_case_persists_pending_record(self):
         case = {"case_id": 41, "action": "warn", "status": "pending"}
