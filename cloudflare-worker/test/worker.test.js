@@ -600,3 +600,52 @@ test("lists ticket activity with guild and channel isolation", async () => {
   assert.deepEqual(DB.calls[0].values, ["123456789012345678", "223456789012345678"]);
   assert.deepEqual(DB.calls[1].values, ["123456789012345678", "223456789012345678", 10]);
 });
+
+
+test("records ticket message metadata and sets first staff response", async () => {
+  const DB = fakeDb({ ticket_id: "123:223", status: "open" });
+  const token = "f".repeat(48);
+  const response = await worker.fetch(
+    new Request("https://worker.example/v1/tickets/channel/223456789012345678/messages", {
+      method: "POST",
+      headers: { Authorization: "Bearer " + token, "Content-Type": "application/json" },
+      body: JSON.stringify({ guild_id: "123456789012345678", actor_id: "323456789012345678", actor_type: "staff", created_at: "2026-11-18T14:00:00Z" }),
+    }),
+    { DB, BOT_API_TOKEN: token },
+  );
+  assert.equal(response.status, 200);
+  assert.match(DB.calls[0].sql, /first_response_at = CASE/);
+  assert.match(DB.calls[1].sql, /'staff_reply'/);
+  assert.deepEqual(DB.calls[0].values, ["2026-11-18T14:00:00Z", "staff", "2026-11-18T14:00:00Z", "staff", "2026-11-18T14:00:00Z", "staff", "2026-11-18T14:00:00Z", "staff", "123456789012345678", "223456789012345678"]);
+});
+
+test("rejects invalid ticket message metadata before D1 access", async () => {
+  const DB = fakeDb();
+  const token = "g".repeat(48);
+  const response = await worker.fetch(
+    new Request("https://worker.example/v1/tickets/channel/223456789012345678/messages", {
+      method: "POST",
+      headers: { Authorization: "Bearer " + token, "Content-Type": "application/json" },
+      body: JSON.stringify({ guild_id: "123456789012345678", actor_id: "323456789012345678", actor_type: "bot", created_at: "not-a-date" }),
+    }),
+    { DB, BOT_API_TOKEN: token },
+  );
+  assert.equal(response.status, 400);
+  assert.equal(DB.calls.length, 0);
+});
+
+test("marks an open ticket escalated once", async () => {
+  const DB = fakeDb({ ticket_id: "123:223", last_escalated_at: "2026-11-18T14:00:00Z" });
+  const token = "h".repeat(48);
+  const response = await worker.fetch(
+    new Request("https://worker.example/v1/tickets/channel/223456789012345678/escalations", {
+      method: "POST",
+      headers: { Authorization: "Bearer " + token, "Content-Type": "application/json" },
+      body: JSON.stringify({ guild_id: "123456789012345678", escalated_at: "2026-11-18T14:00:00Z" }),
+    }),
+    { DB, BOT_API_TOKEN: token },
+  );
+  assert.equal(response.status, 200);
+  assert.match(DB.calls[0].sql, /last_escalated_at IS NULL/);
+  assert.deepEqual(DB.calls[0].values, ["2026-11-18T14:00:00Z", "123456789012345678", "223456789012345678"]);
+});
