@@ -78,7 +78,7 @@ async function handle(request, env) {
     return json({ links: rows.results || [], total: count.total || 0 });
   }
 
-  const guildConfigMatch = path.match(/^\\/v1\\/guilds\\/([0-9]{15,22})\\/config$/);
+  const guildConfigMatch = path.match(/^\/v1\/guilds\/([0-9]{15,22})\/config$/);
   if (guildConfigMatch && request.method === "GET") {
     const config = await env.DB.prepare("SELECT * FROM guild_config WHERE guild_id = ?").bind(guildConfigMatch[1]).first();
     return json({ config: config || null });
