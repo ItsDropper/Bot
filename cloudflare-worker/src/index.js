@@ -236,7 +236,7 @@ async function handle(request, env) {
     return json({ events: rows.results || [] });
   }
 
-  const ticketMessageMatch = path.match(/^\\/v1\\/tickets\\/channel\\/([0-9]{15,22})\\/messages$/);
+  const ticketMessageMatch = path.match(/^\/v1\/tickets\/channel\/([0-9]{15,22})\/messages$/);
   if (ticketMessageMatch && request.method === "POST") {
     let body;
     try { body = await readJson(request); } catch { return json({ error: "Invalid JSON request body" }, 400); }
@@ -266,7 +266,7 @@ async function handle(request, env) {
     return json({ ticket });
   }
 
-  const ticketEscalationMatch = path.match(/^\\/v1\\/tickets\\/channel\\/([0-9]{15,22})\\/escalations$/);
+  const ticketEscalationMatch = path.match(/^\/v1\/tickets\/channel\/([0-9]{15,22})\/escalations$/);
   if (ticketEscalationMatch && request.method === "POST") {
     let body;
     try { body = await readJson(request); } catch { return json({ error: "Invalid JSON request body" }, 400); }
