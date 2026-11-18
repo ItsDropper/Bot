@@ -271,10 +271,10 @@ async function handle(request, env) {
     let body;
     try { body = await readJson(request); } catch { return json({ error: "Invalid JSON request body" }, 400); }
     if (typeof body?.guild_id !== "string" || !/^[0-9]{15,22}$/.test(body.guild_id) ||
+        typeof body?.actor_id !== "string" || !/^[0-9]{15,22}$/.test(body.actor_id) ||
         typeof body?.escalated_at !== "string" || !Number.isFinite(Date.parse(body.escalated_at))) {
       return json({ error: "Invalid ticket escalation metadata" }, 400);
     }
-    if (!validId(body?.actor_id)) return json({ error: "Invalid escalation actor" }, 400);
     const update = env.DB.prepare(
       "UPDATE support_tickets SET last_escalated_at = ?, priority = CASE WHEN priority IN ('low', 'normal') THEN 'high' ELSE priority END " +
       "WHERE guild_id = ? AND channel_id = ? AND status = 'open' AND last_escalated_at IS NULL"
