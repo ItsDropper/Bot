@@ -201,3 +201,24 @@ test("assigns an open support ticket with assignment audit fields", async () => 
     "2026-11-18T12:00:00", "223456789012345678",
   ]);
 });
+
+
+test("closes an open support ticket and records the closing actor", async () => {
+  const DB = fakeDb({ ticket_id: "1:2", status: "open" });
+  const token = "l".repeat(48);
+  const response = await worker.fetch(
+    new Request("https://worker.example/v1/tickets/channel/223456789012345678/close", {
+      method: "PATCH",
+      headers: { Authorization: \`Bearer \${token}\`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        closed_by: "323456789012345678",
+        closed_at: "2026-11-18T13:00:00",
+      }),
+    }),
+    { DB, BOT_API_TOKEN: token },
+  );
+  assert.equal(response.status, 200);
+  assert.deepEqual(DB.calls[1].values, [
+    "2026-11-18T13:00:00", "323456789012345678", "223456789012345678",
+  ]);
+});
