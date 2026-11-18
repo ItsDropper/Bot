@@ -13,6 +13,10 @@ PORT = int(os.environ.get("PORT", 3001))
 TICKET_CATEGORY_ID = 1514689354281259170
 SUPPORT_ROLE_ID = 1514274160329756673
 TICKET_LOG_CHANNEL_ID = 1514004581410013264
+LAUNCHER_ANNOUNCEMENT_CHANNEL_ID = 1530652249653645422
+LAUNCHER_ANNOUNCEMENT_ROLE_ID = 1530664744929722418
+LAUNCHER_RELEASE_TAG = "v1.3.2"
+LAUNCHER_RELEASE_URL = "https://github.com/ItsDropper/Vanta/releases/tag/v1.3.2"
 
 intents = discord.Intents.default()
 
@@ -122,10 +126,6 @@ class CloseSupportTicketView(discord.ui.View):
     async def close_ticket(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self._close(interaction)
 
-    @discord.ui.button(label="Close Ticket", style=discord.ButtonStyle.danger,
-                       custom_id="tier_ticket_close", emoji="🔒")
-    async def close_legacy_ticket(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await self._close(interaction)
 
 
 # ── Support ticket system ─────────────────────────────────────────────────────
@@ -484,8 +484,38 @@ class Client(discord.Client):
         for guild in self.guilds:
             tree.copy_global_to(guild=guild)
             await tree.sync(guild=guild)
+            await reconcile_ticket_close_controls(guild)
         print(f"Logged in as {self.user} (ID: {self.user.id})")
         print(f"Commands synced to {len(self.guilds)} guild(s).")
+
+async def reconcile_ticket_close_controls(guild: discord.Guild):
+    """Replace old ticket messages that exposed both close controls with one control."""
+    category = guild.get_channel(TICKET_CATEGORY_ID)
+    if not isinstance(category, discord.CategoryChannel):
+        return
+    updated = 0
+    for channel in category.text_channels:
+        if not (channel.name.startswith("support-") or channel.name.startswith("app-")):
+            continue
+        try:
+            async for message in channel.history(limit=200):
+                if message.author.id != client.user.id:
+                    continue
+                custom_ids = {
+                    component.custom_id
+                    for row in message.components
+                    for component in row.children
+                    if getattr(component, "custom_id", None)
+                }
+                if "tier_ticket_close" in custom_ids:
+                    await message.edit(view=CloseSupportTicketView())
+                    updated += 1
+                    break
+        except (discord.Forbidden, discord.HTTPException) as exc:
+            print(f"Could not reconcile ticket controls in #{channel.name}: {exc}")
+    if updated:
+        print(f"Replaced duplicate/legacy close controls in {updated} ticket channel(s).")
+
 
 client = Client(intents=intents)
 tree = app_commands.CommandTree(client)
@@ -555,6 +585,61 @@ async def announce(interaction: discord.Interaction, channel: discord.TextChanne
     embed.set_footer(text=f"Posted by {interaction.user.display_name}")
     await channel.send(embed=embed)
     await interaction.response.send_message(f"✅ Announcement sent to {channel.mention}.", ephemeral=True)
+
+
+@tree.command(name="announce_launcher_update", description="Announce the latest Vanta Launcher release")
+async def announce_launcher_update(interaction: discord.Interaction):
+    if not interaction.user.guild_permissions.administrator:
+        await interaction.response.send_message("You need Administrator permission to use this.", ephemeral=True)
+        return
+
+    await interaction.response.defer(ephemeral=True)
+    channel = interaction.guild.get_channel(LAUNCHER_ANNOUNCEMENT_CHANNEL_ID)
+    if channel is None:
+        try:
+            channel = await interaction.guild.fetch_channel(LAUNCHER_ANNOUNCEMENT_CHANNEL_ID)
+        except (discord.NotFound, discord.Forbidden):
+            await interaction.followup.send("The configured launcher announcement channel is unavailable.", ephemeral=True)
+            return
+    if not isinstance(channel, discord.TextChannel):
+        await interaction.followup.send("The configured launcher announcement destination is not a text channel.", ephemeral=True)
+        return
+
+    role = interaction.guild.get_role(LAUNCHER_ANNOUNCEMENT_ROLE_ID)
+    if role is None:
+        await interaction.followup.send("The configured launcher announcement role was not found.", ephemeral=True)
+        return
+
+    embed = discord.Embed(
+        title="Vanta Launcher Update — v1.3.2",
+        description=(
+            "A new Vanta Launcher release is available. Update to the latest version "
+            "to get the newest launcher improvements and fixes.\n\n"
+            f"[View release notes and downloads]({LAUNCHER_RELEASE_URL})"
+        ),
+        url=LAUNCHER_RELEASE_URL,
+        color=0x3978F6,
+    )
+    embed.set_footer(text="Vanta Launcher • Official Release")
+    embed.timestamp = datetime.now().astimezone()
+    try:
+        message = await channel.send(
+            content=role.mention,
+            embed=embed,
+            allowed_mentions=discord.AllowedMentions(
+                roles=[role], users=False, everyone=False, replied_user=False
+            ),
+        )
+    except discord.Forbidden:
+        await interaction.followup.send(
+            "I cannot post there. Check View Channel, Send Messages, Embed Links, and role mention permissions.",
+            ephemeral=True,
+        )
+        return
+    await interaction.followup.send(
+        f"Launcher update announcement posted in {channel.mention} (message {message.id}).",
+        ephemeral=True,
+    )
 
 
 @tree.command(name="say", description="Make the bot send a message to a channel")
