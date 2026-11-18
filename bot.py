@@ -51,6 +51,22 @@ async def close_db():
 
 # ── Permission check ──────────────────────────────────────────────────────────
 
+def is_support_staff(member: discord.Member, guild: discord.Guild) -> bool:
+    support_role = guild.get_role(SUPPORT_ROLE_ID)
+    return member.guild_permissions.administrator or bool(support_role and support_role in member.roles)
+
+
+async def require_support_staff(interaction: discord.Interaction) -> bool:
+    if is_support_staff(interaction.user, interaction.guild):
+        return True
+    message = "Only support staff or administrators can use this control."
+    if interaction.response.is_done():
+        await interaction.followup.send(message, ephemeral=True)
+    else:
+        await interaction.response.send_message(message, ephemeral=True)
+    return False
+
+
 def support_only():
     async def predicate(interaction: discord.Interaction):
         support_role = interaction.guild.get_role(SUPPORT_ROLE_ID)
@@ -71,6 +87,14 @@ class CloseSupportTicketView(discord.ui.View):
         super().__init__(timeout=None)
 
     async def _close(self, interaction: discord.Interaction):
+        topic = interaction.channel.topic or ""
+        owner_match = re.fullmatch(r"vanta_ticket_owner:([0-9]{15,22})", topic)
+        is_owner = bool(owner_match and int(owner_match.group(1)) == interaction.user.id)
+        if not is_owner and not is_support_staff(interaction.user, interaction.guild):
+            await interaction.response.send_message(
+                "Only the ticket creator or support staff can close this ticket.", ephemeral=True
+            )
+            return
         await interaction.response.send_message("Closing ticket...", ephemeral=True)
         if TICKET_LOG_CHANNEL_ID:
             log_channel = interaction.guild.get_channel(TICKET_LOG_CHANNEL_ID)
@@ -138,7 +162,8 @@ class SupportTicketModal(discord.ui.Modal, title="Create Support Ticket"):
         channel = await guild.create_text_channel(
             name=f"support-{safe_name}",
             category=category,
-            overwrites=overwrites
+            overwrites=overwrites,
+            topic=f"vanta_ticket_owner:{interaction.user.id}"
         )
 
         embed = discord.Embed(title="🎫 Support Ticket", color=discord.Color.blurple())
@@ -235,6 +260,8 @@ class DenyReasonModal(discord.ui.Modal, title="Deny with Reason"):
         self.original_message = original_message
 
     async def on_submit(self, interaction: discord.Interaction):
+        if not await require_support_staff(interaction):
+            return
         reason = self.reason_input.value
         try:
             applicant = await client.fetch_user(int(self.applicant_id))
@@ -273,6 +300,8 @@ class ApplicationResultView(discord.ui.View):
 
     @discord.ui.button(label="Approve", style=discord.ButtonStyle.success, custom_id="app_result_approve", emoji="✅")
     async def approve(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not await require_support_staff(interaction):
+            return
         user_id, app_type = self._parse(interaction.message)
         if not user_id:
             await interaction.response.send_message("Could not read applicant info from embed.", ephemeral=True)
@@ -302,6 +331,8 @@ class ApplicationResultView(discord.ui.View):
 
     @discord.ui.button(label="Deny", style=discord.ButtonStyle.danger, custom_id="app_result_deny", emoji="❌")
     async def deny(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not await require_support_staff(interaction):
+            return
         user_id, app_type = self._parse(interaction.message)
         if not user_id:
             await interaction.response.send_message("Could not read applicant info from embed.", ephemeral=True)
@@ -324,6 +355,8 @@ class ApplicationResultView(discord.ui.View):
 
     @discord.ui.button(label="Private Ticket", style=discord.ButtonStyle.secondary, custom_id="app_result_ticket", emoji="💬")
     async def private_ticket(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not await require_support_staff(interaction):
+            return
         user_id, app_type = self._parse(interaction.message)
         if not user_id:
             await interaction.response.send_message("Could not read applicant info from embed.", ephemeral=True)
@@ -346,7 +379,8 @@ class ApplicationResultView(discord.ui.View):
         channel = await interaction.guild.create_text_channel(
             name=f"app-{safe_name}",
             category=category,
-            overwrites=overwrites
+            overwrites=overwrites,
+            topic=f"vanta_ticket_owner:{member.id}"
         )
         embed = discord.Embed(
             title="Application Discussion",
@@ -358,6 +392,8 @@ class ApplicationResultView(discord.ui.View):
 
     @discord.ui.button(label="Deny with Reason", style=discord.ButtonStyle.danger, custom_id="app_result_deny_reason", emoji="📝")
     async def deny_with_reason(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not await require_support_staff(interaction):
+            return
         user_id, app_type = self._parse(interaction.message)
         if not user_id:
             await interaction.response.send_message("Could not read applicant info from embed.", ephemeral=True)
