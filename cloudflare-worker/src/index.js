@@ -107,6 +107,37 @@ async function handle(request, env) {
     return json({ config: saved });
   }
 
+  const releaseMatch = path.match(/^\\/v1\\/releases\\/([0-9]{15,22})\\/([a-z][a-z0-9_-]{0,31})\\/([A-Za-z0-9][A-Za-z0-9._+-]{0,79})$/);
+  if (releaseMatch && request.method === "GET") {
+    const announcement = await env.DB.prepare(
+      "SELECT guild_id, project, release_tag, channel_id, message_id, announced_at FROM release_announcements WHERE guild_id = ? AND project = ? AND release_tag = ?"
+    ).bind(releaseMatch[1], releaseMatch[2], releaseMatch[3]).first();
+    return announcement ? json({ announcement }) : json({ error: "Release has not been announced" }, 404);
+  }
+
+  if (path === "/v1/releases" && request.method === "POST") {
+    let body;
+    try { body = await readJson(request); } catch { return json({ error: "Invalid JSON request body" }, 400); }
+    const validId = value => typeof value === "string" && /^[0-9]{15,22}$/.test(value);
+    if (!validId(body?.guild_id) || !validId(body?.channel_id) || !validId(body?.message_id) ||
+        typeof body?.project !== "string" || !/^[a-z][a-z0-9_-]{0,31}$/.test(body.project) ||
+        typeof body?.release_tag !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._+-]{0,79}$/.test(body.release_tag) ||
+        typeof body?.announced_at !== "string" || !Number.isFinite(Date.parse(body.announced_at))) {
+      return json({ error: "Invalid release announcement record" }, 400);
+    }
+    try {
+      await env.DB.prepare(
+        "INSERT INTO release_announcements (guild_id, project, release_tag, channel_id, message_id, announced_at) VALUES (?, ?, ?, ?, ?, ?)"
+      ).bind(body.guild_id, body.project, body.release_tag, body.channel_id, body.message_id, body.announced_at).run();
+    } catch (error) {
+      if (/unique constraint failed|constraint failed/i.test(String(error?.message || error))) {
+        return json({ error: "Release has already been recorded for this guild" }, 409);
+      }
+      throw error;
+    }
+    return json({ announcement: body }, 201);
+  }
+
   if (path === "/v1/audit-events" && request.method === "POST") {
     let body;
     try { body = await readJson(request); } catch { return json({ error: "Invalid JSON request body" }, 400); }
