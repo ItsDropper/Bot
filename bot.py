@@ -8,11 +8,14 @@ from discord import app_commands
 from discord.ext import tasks
 from aiohttp import web
 
+from config.settings import Settings
 from core.database import CloudflareDatabase, DatabaseError, MinecraftLinkConflict
 from core.audit import AuditService
+from core.permissions import PermissionService
 from cogs.moderation import register_moderation_commands
 
-PORT = int(os.environ.get("PORT", 3001))
+settings = Settings.from_env()
+PORT = settings.port
 
 TICKET_CATEGORY_ID = 1514689354281259170
 SUPPORT_ROLE_ID = 1514274160329756673
@@ -29,10 +32,7 @@ BOT_STARTED_AT = datetime.utcnow()
 
 async def init_db():
     global database
-    worker_url = os.environ.get("CLOUDFLARE_WORKER_URL", "").strip()
-    api_token = os.environ.get("CLOUDFLARE_BOT_API_TOKEN", "").strip()
-    if not worker_url or not api_token:
-        raise RuntimeError("CLOUDFLARE_WORKER_URL and CLOUDFLARE_BOT_API_TOKEN are required")
+    worker_url, api_token = settings.require_database_credentials()
     if database is None:
         candidate = CloudflareDatabase(worker_url, api_token)
         await candidate.start()
@@ -70,35 +70,10 @@ async def close_db():
 
 # ── Permission check ──────────────────────────────────────────────────────────
 
-async def is_support_staff(member: discord.Member, guild: discord.Guild) -> bool:
-    if member.guild_permissions.administrator:
-        return True
-    config = await database.get_guild_config(str(guild.id)) or {}
-    role_id = int(config.get("support_role_id") or SUPPORT_ROLE_ID)
-    support_role = guild.get_role(role_id)
-    return bool(support_role and support_role in member.roles)
-
-
-async def require_support_staff(interaction: discord.Interaction) -> bool:
-    if await is_support_staff(interaction.user, interaction.guild):
-        return True
-    message = "Only support staff or administrators can use this control."
-    if interaction.response.is_done():
-        await interaction.followup.send(message, ephemeral=True)
-    else:
-        await interaction.response.send_message(message, ephemeral=True)
-    return False
-
-
-def support_only():
-    async def predicate(interaction: discord.Interaction):
-        if await is_support_staff(interaction.user, interaction.guild):
-            return True
-        await interaction.response.send_message(
-            "You need the **support** role to use this command.", ephemeral=True
-        )
-        return False
-    return app_commands.check(predicate)
+permission_service = PermissionService(lambda: database, SUPPORT_ROLE_ID)
+is_support_staff = permission_service.is_support_staff
+require_support_staff = permission_service.require_support_staff
+support_only = permission_service.support_only
 
 # ── Support ticket close control ──────────────────────────────────────────────
 
@@ -1349,9 +1324,7 @@ async def api_health(request):
 
 
 async def main():
-    token = os.environ.get("DISCORD_BOT_TOKEN")
-    if not token:
-        raise RuntimeError("DISCORD_BOT_TOKEN environment variable is required")
+    token = settings.require_discord_token()
     await init_db()
     app = web.Application()
     app.router.add_get("/", health)
