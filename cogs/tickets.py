@@ -203,6 +203,8 @@ def register_ticket_commands(tree, database_provider, support_only, is_support_s
                     summary = "**Staff response** · response recorded"
                 elif action == "priority_changed":
                     summary = f"**Priority changed** · {str(details.get('priority', 'unknown')).upper()}"
+                elif action == "automation_escalated":
+                    summary = "**SLA escalation** · priority raised to HIGH"
                 else:
                     summary = f"**{discord.utils.escape_markdown(action.replace('_', ' ').title())}**"
                 timestamp = int(datetime.fromisoformat(event["created_at"].replace("Z", "+00:00")).timestamp())
