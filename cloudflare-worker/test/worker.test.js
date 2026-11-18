@@ -642,11 +642,14 @@ test("marks an open ticket escalated once", async () => {
     new Request("https://worker.example/v1/tickets/channel/223456789012345678/escalations", {
       method: "POST",
       headers: { Authorization: "Bearer " + token, "Content-Type": "application/json" },
-      body: JSON.stringify({ guild_id: "123456789012345678", escalated_at: "2026-11-18T14:00:00Z" }),
+      body: JSON.stringify({ guild_id: "123456789012345678", actor_id: "323456789012345678", escalated_at: "2026-11-18T14:00:00Z" }),
     }),
     { DB, BOT_API_TOKEN: token },
   );
   assert.equal(response.status, 200);
   assert.match(DB.calls[0].sql, /last_escalated_at IS NULL/);
+  assert.match(DB.calls[0].sql, /priority = CASE/);
+  assert.match(DB.calls[1].sql, /automation_escalated/);
   assert.deepEqual(DB.calls[0].values, ["2026-11-18T14:00:00Z", "123456789012345678", "223456789012345678"]);
+  assert.equal(DB.calls[1].values[0], "323456789012345678");
 });
