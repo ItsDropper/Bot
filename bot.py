@@ -915,27 +915,24 @@ class Client(discord.Client):
     async def before_ticket_automation_monitor(self):
         await self.wait_until_ready()
     async def on_member_join(self, member: discord.Member):
-        """Post an automatic welcome panel; do not send unsolicited DMs."""
+        """Send the welcome privately to the joining member; never post it in a guild channel."""
         if member.bot:
             return
         guild = member.guild
-        candidates = [guild.system_channel] + [c for c in guild.text_channels if c.name.casefold() in {"welcome", "start-here", "introductions"}]
-        channel = next((c for c in candidates if isinstance(c, discord.TextChannel) and c.permissions_for(guild.me).send_messages and c.permissions_for(guild.me).embed_links), None)
-        if channel is None:
-            print(f"No usable welcome channel in guild {guild.id}; member welcome skipped.")
-            return
         embed = discord.Embed(title=f"{VANTA_EMOJI_MARKUP}  WELCOME TO VANTA",
-            description=f"Welcome {member.mention}. This is the community for Vanta Launcher and the wider Vanta modding ecosystem.", color=0x3978F6)
+            description=f"Welcome to **{discord.utils.escape_markdown(guild.name)}**. This is the community for Vanta Launcher and the wider Vanta modding ecosystem.", color=0x3978F6)
         embed.add_field(name="01  /  FIND YOUR WAY", value="Read the server rules and start-here information before posting.", inline=False)
         embed.add_field(name="02  /  CONNECT", value="Use `/link` if you want to connect your Minecraft account.", inline=False)
         embed.add_field(name="03  /  GET HELP", value="Use the Support Center panel for private, tracked technical support.", inline=False)
         embed.set_thumbnail(url=member.display_avatar.url)
-        embed.set_footer(text="VANTA  •  COMMUNITY ONBOARDING")
-        embed.timestamp = datetime.utcnow()
+        embed.set_footer(text="VANTA  •  PRIVATE COMMUNITY ONBOARDING")
+        embed.timestamp = datetime.now(timezone.utc)
         try:
-            await channel.send(content=member.mention, embed=embed, view=WelcomePanelView(), allowed_mentions=discord.AllowedMentions(users=[member], roles=False, everyone=False))
+            await member.send(embed=embed, view=WelcomePanelView())
         except (discord.Forbidden, discord.HTTPException) as exc:
-            print(f"Could not welcome member {member.id} in guild {guild.id}: {type(exc).__name__}: {exc}")
+            # Discord users can disable server-member DMs. Do not fall back to a
+            # public channel: privacy is the explicit behavior requested.
+            print(f"Could not privately welcome member {member.id} in guild {guild.id}: {type(exc).__name__}: {exc}")
 
     async def on_message(self, message: discord.Message):
         """Record ticket message metadata only; message contents are never stored."""
