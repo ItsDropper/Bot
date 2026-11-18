@@ -154,5 +154,22 @@ class CloudflareDatabaseTests(unittest.IsolatedAsyncioTestCase):
             await client.list_audit_events("123456789012345678", limit=26)
         self.assertEqual(session.calls, [])
 
+    async def test_release_announcement_lookup_and_record(self):
+        client, session = self.make_client(201, {"announcement": {"release_tag": "v1.3.3"}})
+        result = await client.record_release_announcement(
+            guild_id="123456789012345678", project="launcher", release_tag="v1.3.3",
+            channel_id="223456789012345678", message_id="323456789012345678",
+            announced_at="2026-11-18T12:00:00",
+        )
+        self.assertEqual(result["release_tag"], "v1.3.3")
+        self.assertEqual(session.calls[0][0], "POST")
+        self.assertEqual(session.calls[0][2]["json"]["project"], "launcher")
+
+    async def test_release_lookup_treats_missing_record_as_none(self):
+        client, session = self.make_client(404, {"error": "Release has not been announced"})
+        result = await client.get_release_announcement("123456789012345678", "launcher", "v1.3.3")
+        self.assertIsNone(result)
+        self.assertTrue(session.calls[0][1].endswith("/v1/releases/123456789012345678/launcher/v1.3.3"))
+
 if __name__ == "__main__":
     unittest.main()
