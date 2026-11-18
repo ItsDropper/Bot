@@ -316,3 +316,66 @@ test("lists audit events with a bounded guild-scoped query", async () => {
   assert.equal(response.status, 200);
   assert.deepEqual(DB.calls[0].values, ["123456789012345678", 15, 0]);
 });
+
+
+test("records a release announcement with a unique guild/project/tag key", async () => {
+  const DB = fakeDb();
+  const token = "r".repeat(48);
+  const response = await worker.fetch(
+    new Request("https://worker.example/v1/releases", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        guild_id: "123456789012345678",
+        project: "launcher",
+        release_tag: "v1.3.3",
+        channel_id: "223456789012345678",
+        message_id: "323456789012345678",
+        announced_at: "2026-11-18T12:00:00",
+      }),
+    }),
+    { DB, BOT_API_TOKEN: token },
+  );
+  assert.equal(response.status, 201);
+  assert.match(DB.calls[0].sql, /^INSERT INTO release_announcements/);
+  assert.deepEqual(DB.calls[0].values.slice(0, 3), [
+    "123456789012345678", "launcher", "v1.3.3",
+  ]);
+});
+
+test("rejects invalid release announcement metadata before SQL", async () => {
+  const DB = fakeDb();
+  const token = "s".repeat(48);
+  const response = await worker.fetch(
+    new Request("https://worker.example/v1/releases", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        guild_id: "invalid",
+        project: "launcher",
+        release_tag: "v1.3.3",
+        channel_id: "223456789012345678",
+        message_id: "323456789012345678",
+        announced_at: "2026-11-18T12:00:00",
+      }),
+    }),
+    { DB, BOT_API_TOKEN: token },
+  );
+  assert.equal(response.status, 400);
+  assert.equal(DB.calls.length, 0);
+});
+
+test("looks up an existing release announcement by guild, project and tag", async () => {
+  const announcement = { guild_id: "123456789012345678", project: "launcher", release_tag: "v1.3.3" };
+  const DB = fakeDb(announcement);
+  const token = "t".repeat(48);
+  const response = await worker.fetch(
+    new Request("https://worker.example/v1/releases/123456789012345678/launcher/v1.3.3", {
+      headers: { Authorization: `Bearer ${token}` },
+    }),
+    { DB, BOT_API_TOKEN: token },
+  );
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), { announcement });
+  assert.deepEqual(DB.calls[0].values, ["123456789012345678", "launcher", "v1.3.3"]);
+});
