@@ -283,7 +283,7 @@ async function handle(request, env) {
     return json({ ticket });
   }
 
-  const assignTicketMatch = path.match(/^\\/v1\\/tickets\\/channel\\/([0-9]{15,22})\\/assign$/);
+  const assignTicketMatch = path.match(/^\/v1\/tickets\/channel\/([0-9]{15,22})\/assign$/);
   if (assignTicketMatch && request.method === "PATCH") {
     let body;
     try { body = await readJson(request); } catch { return json({ error: "Invalid JSON request body" }, 400); }
