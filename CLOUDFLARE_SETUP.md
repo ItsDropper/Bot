@@ -2,6 +2,8 @@
 
 The Python bot stays on its current host (for example, Render). A small Cloudflare Worker exposes only the Minecraft-link operations the bot needs; the Worker accesses D1 through a private binding. The bot cannot submit arbitrary SQL and does not need a Cloudflare account API token.
 
+**Deployment order matters:** the updated bot now requires both Cloudflare environment variables at startup. If your host auto-deploys from `main`, configure and deploy the Worker, then add the two bot environment variables before restarting the bot. Until then, the new bot process will exit rather than silently use the old PostgreSQL database.
+
 ## 1. Create the D1 database
 
 Requirements: a Cloudflare account and Node.js/npm on your computer.
