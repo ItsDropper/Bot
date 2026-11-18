@@ -18,7 +18,7 @@ def register_ticket_commands(tree, database_provider, support_only, audit_record
 
     @tree.command(name="ticketnote", description="Add a private internal note to a support ticket")
     @app_commands.describe(channel="Open support ticket", note="Staff-only note (not visible to the ticket owner)")
-    @app_commands.checks.guild_only()
+    @app_commands.guild_only()
     @support_only()
     async def ticketnote(interaction: discord.Interaction, channel: discord.TextChannel,
                          note: app_commands.Range[str, 1, 1000]):
@@ -52,7 +52,7 @@ def register_ticket_commands(tree, database_provider, support_only, audit_record
         app_commands.Choice(name="High", value="high"),
         app_commands.Choice(name="Urgent", value="urgent"),
     ])
-    @app_commands.checks.guild_only()
+    @app_commands.guild_only()
     @support_only()
     async def ticketpriority(interaction: discord.Interaction, channel: discord.TextChannel,
                              priority: app_commands.Choice[str]):
@@ -80,7 +80,7 @@ def register_ticket_commands(tree, database_provider, support_only, audit_record
 
     @tree.command(name="ticketactivity", description="View the persistent activity timeline for a support ticket")
     @app_commands.describe(channel="Support ticket to inspect")
-    @app_commands.checks.guild_only()
+    @app_commands.guild_only()
     @support_only()
     async def ticketactivity(interaction: discord.Interaction, channel: discord.TextChannel):
         await interaction.response.defer(ephemeral=True)
