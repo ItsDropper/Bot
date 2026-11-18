@@ -38,11 +38,14 @@ class ModerationService:
             raise ValueError("Invalid moderation case ID")
         if status not in STATUSES:
             raise ValueError("A moderation case can only be completed as applied or failed")
+        completed_at = completed_at or datetime.now(timezone.utc).isoformat()
+        if not _valid_timestamp(completed_at):
+            raise ValueError("Invalid moderation completion timestamp")
         if failure_reason is not None:
             failure_reason = str(failure_reason).strip()[:500] or None
         return await self.database.complete_moderation_case(
             case_id, status=status,
-            completed_at=completed_at or datetime.now(timezone.utc).isoformat(),
+            completed_at=completed_at,
             failure_reason=failure_reason,
         )
 
