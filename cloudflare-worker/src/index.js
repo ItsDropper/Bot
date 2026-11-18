@@ -255,11 +255,9 @@ async function handle(request, env) {
         (body.expires_at != null && (typeof body.expires_at !== "string" || !Number.isFinite(Date.parse(body.expires_at))))) {
       return json({ error: "Invalid moderation case" }, 400);
     }
-    const result = await env.DB.prepare(
-      "INSERT INTO moderation_cases (guild_id, target_id, moderator_id, action, reason, status, created_at, expires_at) VALUES (?, ?, ?, ?, ?, 'pending', ?, ?)"
-    ).bind(body.guild_id, body.target_id, body.moderator_id, body.action, body.reason.trim(), body.created_at, body.expires_at || null).run();
-    const caseRow = await env.DB.prepare("SELECT * FROM moderation_cases WHERE case_id = ?")
-      .bind(result.meta?.last_row_id).first();
+    const caseRow = await env.DB.prepare(
+      "INSERT INTO moderation_cases (guild_id, target_id, moderator_id, action, reason, status, created_at, expires_at) VALUES (?, ?, ?, ?, ?, 'pending', ?, ?) RETURNING *"
+    ).bind(body.guild_id, body.target_id, body.moderator_id, body.action, body.reason.trim(), body.created_at, body.expires_at || null).first();
     return json({ case: caseRow }, 201);
   }
 
@@ -273,13 +271,10 @@ async function handle(request, env) {
       return json({ error: "Invalid moderation case completion" }, 400);
     }
     const caseId = Number(moderationCaseMatch[1]);
-    const existing = await env.DB.prepare("SELECT * FROM moderation_cases WHERE case_id = ?").bind(caseId).first();
-    if (!existing) return json({ error: "Moderation case not found" }, 404);
-    if (existing.status !== "pending") return json({ error: "Moderation case is already finalized" }, 409);
-    await env.DB.prepare(
-      "UPDATE moderation_cases SET status = ?, completed_at = ?, failure_reason = ? WHERE case_id = ? AND status = 'pending'"
-    ).bind(body.status, body.completed_at, body.failure_reason || null, caseId).run();
-    const caseRow = await env.DB.prepare("SELECT * FROM moderation_cases WHERE case_id = ?").bind(caseId).first();
+    const caseRow = await env.DB.prepare(
+      "UPDATE moderation_cases SET status = ?, completed_at = ?, failure_reason = ? WHERE case_id = ? AND status = 'pending' RETURNING *"
+    ).bind(body.status, body.completed_at, body.failure_reason || null, caseId).first();
+    if (!caseRow) return json({ error: "Moderation case does not exist or has already been finalized" }, 409);
     return json({ case: caseRow });
   }
 
