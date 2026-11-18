@@ -1,5 +1,3 @@
-PRAGMA foreign_keys = OFF;
-
 CREATE TABLE support_ticket_activity_new (
     event_id INTEGER PRIMARY KEY AUTOINCREMENT,
     ticket_id TEXT NOT NULL,
@@ -30,5 +28,3 @@ CREATE INDEX IF NOT EXISTS idx_ticket_activity_channel
     ON support_ticket_activity(guild_id, channel_id, event_id DESC);
 CREATE INDEX IF NOT EXISTS idx_ticket_activity_ticket
     ON support_ticket_activity(ticket_id, event_id DESC);
-
-PRAGMA foreign_keys = ON;
