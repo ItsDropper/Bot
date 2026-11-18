@@ -51,33 +51,57 @@ class CloudflareDatabase:
         if payload is not None:
             headers["Content-Type"] = "application/json"
 
-        try:
-            async with self._session.request(
-                method, f"{self.base_url}{path}", headers=headers, json=payload
-            ) as response:
-                try:
-                    body = await response.json(content_type=None)
-                except (aiohttp.ContentTypeError, ValueError):
-                    body = {}
+        # Only GET requests are retried: POST/PATCH operations are not yet
+        # idempotency-keyed, so replaying them after a lost response is unsafe.
+        retryable = method.upper() == "GET"
+        max_attempts = 3 if retryable else 1
 
-                if response.status == 404 and allow_missing:
-                    return None
-                if response.status == 409:
-                    if path.startswith("/v1/minecraft-links/"):
-                        raise MinecraftLinkConflict("Minecraft username is already linked")
-                    raise DatabaseError(body.get("error", "The database rejected a conflicting operation"))
-                if response.status < 200 or response.status >= 300:
-                    message = body.get("error") if isinstance(body, dict) else None
-                    raise DatabaseError(message or f"Cloudflare Worker returned HTTP {response.status}")
-                if not isinstance(body, dict):
-                    raise DatabaseError("Cloudflare Worker returned an invalid response")
-                return body
-        except (MinecraftLinkConflict, DatabaseError):
-            raise
-        except asyncio.TimeoutError as exc:
-            raise DatabaseError("Cloudflare Worker request timed out") from exc
-        except aiohttp.ClientError as exc:
-            raise DatabaseError("Could not reach the Cloudflare Worker") from exc
+        for attempt in range(max_attempts):
+            try:
+                async with self._session.request(
+                    method, f"{self.base_url}{path}", headers=headers, json=payload
+                ) as response:
+                    try:
+                        body = await response.json(content_type=None)
+                    except (aiohttp.ContentTypeError, ValueError):
+                        body = {}
+
+                    if retryable and response.status in {429, 500, 502, 503, 504} and attempt < max_attempts - 1:
+                        retry_after = 0.0
+                        try:
+                            retry_after = float(response.headers.get("Retry-After", "0"))
+                        except (TypeError, ValueError):
+                            pass
+                        delay = min(2.0, max(retry_after, 0.15 * (2 ** attempt)))
+                        await asyncio.sleep(delay)
+                        continue
+
+                    if response.status == 404 and allow_missing:
+                        return None
+                    if response.status == 409:
+                        if path.startswith("/v1/minecraft-links/"):
+                            raise MinecraftLinkConflict("Minecraft username is already linked")
+                        raise DatabaseError(body.get("error", "The database rejected a conflicting operation"))
+                    if response.status < 200 or response.status >= 300:
+                        message = body.get("error") if isinstance(body, dict) else None
+                        raise DatabaseError(message or f"Cloudflare Worker returned HTTP {response.status}")
+                    if not isinstance(body, dict):
+                        raise DatabaseError("Cloudflare Worker returned an invalid response")
+                    return body
+            except (MinecraftLinkConflict, DatabaseError):
+                raise
+            except asyncio.TimeoutError as exc:
+                if retryable and attempt < max_attempts - 1:
+                    await asyncio.sleep(0.15 * (2 ** attempt))
+                    continue
+                raise DatabaseError("Cloudflare Worker request timed out") from exc
+            except aiohttp.ClientError as exc:
+                if retryable and attempt < max_attempts - 1:
+                    await asyncio.sleep(0.15 * (2 ** attempt))
+                    continue
+                raise DatabaseError("Could not reach the Cloudflare Worker") from exc
+
+        raise DatabaseError("Cloudflare Worker request exhausted its retry budget")
 
     async def healthcheck(self):
         result = await self._request("GET", "/v1/health")
