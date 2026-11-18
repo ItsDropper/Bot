@@ -201,6 +201,25 @@ class CloudflareDatabase:
         )
         return result["events"]
 
+
+    async def get_release_announcement(self, guild_id: str, project: str, release_tag: str):
+        path = (
+            f"/v1/releases/{quote(str(guild_id), safe='')}/"
+            f"{quote(project, safe='')}/{quote(release_tag, safe='')}"
+        )
+        result = await self._request("GET", path, allow_missing=True)
+        return result.get("announcement") if result else None
+
+    async def record_release_announcement(self, *, guild_id: str, project: str,
+                                          release_tag: str, channel_id: str,
+                                          message_id: str, announced_at: str):
+        result = await self._request("POST", "/v1/releases", payload={
+            "guild_id": str(guild_id), "project": project, "release_tag": release_tag,
+            "channel_id": str(channel_id), "message_id": str(message_id),
+            "announced_at": announced_at,
+        })
+        return result["announcement"]
+
     async def assign_support_ticket(self, channel_id: str, assigned_to: str,
                                     assigned_by: str, assigned_at: str):
         result = await self._request(
