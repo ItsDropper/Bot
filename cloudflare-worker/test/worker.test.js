@@ -379,3 +379,113 @@ test("looks up an existing release announcement by guild, project and tag", asyn
   assert.deepEqual(await response.json(), { announcement });
   assert.deepEqual(DB.calls[0].values, ["123456789012345678", "launcher", "v1.3.3"]);
 });
+
+
+test("creates a pending moderation case with validated, bound values", async () => {
+  const row = { case_id: 41, guild_id: "123456789012345678", action: "warn", status: "pending" };
+  const DB = fakeDb(row);
+  const token = "u".repeat(48);
+  const response = await worker.fetch(
+    new Request("https://worker.example/v1/moderation/cases", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        guild_id: "123456789012345678",
+        target_id: "223456789012345678",
+        moderator_id: "323456789012345678",
+        action: "warn",
+        reason: "Repeated spam",
+        created_at: "2026-11-18T12:00:00Z",
+      }),
+    }),
+    { DB, BOT_API_TOKEN: token },
+  );
+  assert.equal(response.status, 201);
+  assert.deepEqual(await response.json(), { case: row });
+  assert.match(DB.calls[0].sql, /INSERT INTO moderation_cases.*RETURNING \*/);
+  assert.deepEqual(DB.calls[0].values.slice(0, 5), [
+    "123456789012345678", "223456789012345678",
+    "323456789012345678", "warn", "Repeated spam",
+  ]);
+});
+
+test("rejects invalid moderation action and oversized reason before SQL", async () => {
+  const DB = fakeDb();
+  const token = "v".repeat(48);
+  const response = await worker.fetch(
+    new Request("https://worker.example/v1/moderation/cases", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        guild_id: "123456789012345678",
+        target_id: "223456789012345678",
+        moderator_id: "323456789012345678",
+        action: "delete-everything",
+        reason: "x".repeat(600),
+        created_at: "2026-11-18T12:00:00Z",
+      }),
+    }),
+    { DB, BOT_API_TOKEN: token },
+  );
+  assert.equal(response.status, 400);
+  assert.equal(DB.calls.length, 0);
+});
+
+test("finalizes a moderation case with a single pending-to-applied transition", async () => {
+  const row = { case_id: 41, status: "applied" };
+  const DB = fakeDb(row);
+  const token = "w".repeat(48);
+  const response = await worker.fetch(
+    new Request("https://worker.example/v1/moderation/cases/41", {
+      method: "PATCH",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ status: "applied", completed_at: "2026-11-18T12:01:00Z" }),
+    }),
+    { DB, BOT_API_TOKEN: token },
+  );
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), { case: row });
+  assert.match(DB.calls[0].sql, /UPDATE moderation_cases.*status = 'pending' RETURNING \*/);
+});
+
+test("rejects malformed moderation case completion before SQL", async () => {
+  const DB = fakeDb();
+  const token = "x".repeat(48);
+  const response = await worker.fetch(
+    new Request("https://worker.example/v1/moderation/cases/41", {
+      method: "PATCH",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ status: "pending", completed_at: "not-a-date" }),
+    }),
+    { DB, BOT_API_TOKEN: token },
+  );
+  assert.equal(response.status, 400);
+  assert.equal(DB.calls.length, 0);
+});
+
+test("lists moderation cases scoped to guild and optional target", async () => {
+  const DB = fakeDb({ total: 2 });
+  const token = "y".repeat(48);
+  const response = await worker.fetch(
+    new Request("https://worker.example/v1/moderation/cases?guild_id=123456789012345678&target_id=223456789012345678&limit=5", {
+      headers: { Authorization: `Bearer ${token}` },
+    }),
+    { DB, BOT_API_TOKEN: token },
+  );
+  assert.equal(response.status, 200);
+  assert.deepEqual(DB.calls[0].values, ["123456789012345678", "223456789012345678", 5, 0]);
+  assert.deepEqual(DB.calls[1].values, ["123456789012345678", "223456789012345678"]);
+});
+
+test("rejects unbounded moderation case pagination", async () => {
+  const DB = fakeDb();
+  const token = "z".repeat(48);
+  const response = await worker.fetch(
+    new Request("https://worker.example/v1/moderation/cases?guild_id=123456789012345678&limit=500", {
+      headers: { Authorization: `Bearer ${token}` },
+    }),
+    { DB, BOT_API_TOKEN: token },
+  );
+  assert.equal(response.status, 400);
+  assert.equal(DB.calls.length, 0);
+});
