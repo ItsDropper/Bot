@@ -274,10 +274,22 @@ async function handle(request, env) {
         typeof body?.escalated_at !== "string" || !Number.isFinite(Date.parse(body.escalated_at))) {
       return json({ error: "Invalid ticket escalation metadata" }, 400);
     }
+    if (!validId(body?.actor_id)) return json({ error: "Invalid escalation actor" }, 400);
+    const update = env.DB.prepare(
+      "UPDATE support_tickets SET last_escalated_at = ?, priority = CASE WHEN priority IN ('low', 'normal') THEN 'high' ELSE priority END " +
+      "WHERE guild_id = ? AND channel_id = ? AND status = 'open' AND last_escalated_at IS NULL"
+    ).bind(body.escalated_at, body.guild_id, ticketEscalationMatch[1]);
+    const activity = env.DB.prepare(
+      "INSERT INTO support_ticket_activity (ticket_id, guild_id, channel_id, actor_id, action, details, created_at) " +
+      "SELECT ticket_id, guild_id, channel_id, ?, 'automation_escalated', ?, ? FROM support_tickets " +
+      "WHERE guild_id = ? AND channel_id = ? AND status = 'open' AND last_escalated_at = ?"
+    ).bind(body.actor_id, JSON.stringify({ reason: "response_sla_exceeded", priority: "high" }),
+      body.escalated_at, body.guild_id, ticketEscalationMatch[1], body.escalated_at);
+    const results = await env.DB.batch([update, activity]);
+    if (!results[0]?.meta?.changes) return json({ error: "Ticket not found or already escalated" }, 409);
     const ticket = await env.DB.prepare(
-      "UPDATE support_tickets SET last_escalated_at = ? WHERE guild_id = ? AND channel_id = ? AND status = 'open' AND last_escalated_at IS NULL RETURNING *"
-    ).bind(body.escalated_at, body.guild_id, ticketEscalationMatch[1]).first();
-    if (!ticket) return json({ error: "Ticket not found or already escalated" }, 409);
+      "SELECT * FROM support_tickets WHERE guild_id = ? AND channel_id = ?"
+    ).bind(body.guild_id, ticketEscalationMatch[1]).first();
     return json({ ticket });
   }
   const ticketNoteMatch = path.match(/^\/v1\/tickets\/channel\/([0-9]{15,22})\/notes$/);
