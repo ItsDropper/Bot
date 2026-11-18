@@ -68,13 +68,17 @@ async def close_db():
 
 # ── Permission check ──────────────────────────────────────────────────────────
 
-def is_support_staff(member: discord.Member, guild: discord.Guild) -> bool:
-    support_role = guild.get_role(SUPPORT_ROLE_ID)
-    return member.guild_permissions.administrator or bool(support_role and support_role in member.roles)
+async def is_support_staff(member: discord.Member, guild: discord.Guild) -> bool:
+    if member.guild_permissions.administrator:
+        return True
+    config = await database.get_guild_config(str(guild.id)) or {}
+    role_id = int(config.get("support_role_id") or SUPPORT_ROLE_ID)
+    support_role = guild.get_role(role_id)
+    return bool(support_role and support_role in member.roles)
 
 
 async def require_support_staff(interaction: discord.Interaction) -> bool:
-    if is_support_staff(interaction.user, interaction.guild):
+    if await is_support_staff(interaction.user, interaction.guild):
         return True
     message = "Only support staff or administrators can use this control."
     if interaction.response.is_done():
@@ -86,10 +90,7 @@ async def require_support_staff(interaction: discord.Interaction) -> bool:
 
 def support_only():
     async def predicate(interaction: discord.Interaction):
-        support_role = interaction.guild.get_role(SUPPORT_ROLE_ID)
-        has_role = support_role and support_role in interaction.user.roles
-        is_admin = interaction.user.guild_permissions.administrator
-        if has_role or is_admin:
+        if await is_support_staff(interaction.user, interaction.guild):
             return True
         await interaction.response.send_message(
             "You need the **support** role to use this command.", ephemeral=True
@@ -107,7 +108,7 @@ class CloseSupportTicketView(discord.ui.View):
         topic = interaction.channel.topic or ""
         owner_match = re.fullmatch(r"vanta_ticket_owner:([0-9]{15,22})", topic)
         is_owner = bool(owner_match and int(owner_match.group(1)) == interaction.user.id)
-        if not is_owner and not is_support_staff(interaction.user, interaction.guild):
+        if not is_owner and not await is_support_staff(interaction.user, interaction.guild):
             await interaction.response.send_message(
                 "Only the ticket creator or support staff can close this ticket.", ephemeral=True
             )
@@ -123,14 +124,17 @@ class CloseSupportTicketView(discord.ui.View):
                     await interaction.followup.send(f"Could not close ticket safely: {exc}", ephemeral=True)
                     return
                 print(f"Closing legacy ticket {interaction.channel.id} without a D1 record.")
-        if TICKET_LOG_CHANNEL_ID:
-            log_channel = interaction.guild.get_channel(TICKET_LOG_CHANNEL_ID)
+        config = await database.get_guild_config(str(interaction.guild.id)) or {}
+        log_channel_id = int(config.get("ticket_log_channel_id") or TICKET_LOG_CHANNEL_ID)
+        if log_channel_id:
+            log_channel = interaction.guild.get_channel(log_channel_id)
             if log_channel:
                 embed = discord.Embed(title="Ticket Closed", color=discord.Color.red())
                 embed.add_field(name="Channel", value=interaction.channel.name, inline=True)
                 embed.add_field(name="Closed by", value=interaction.user.mention, inline=True)
                 embed.set_footer(text=datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC"))
                 await log_channel.send(embed=embed)
+        await record_audit(interaction.guild.id, interaction.user.id, "ticket.closed", target_id=interaction.channel.id)
         await interaction.followup.send('Ticket closed and recorded in the database.', ephemeral=True)
         await interaction.channel.delete()
 
@@ -153,7 +157,10 @@ class SupportTicketModal(discord.ui.Modal, title="Create Support Ticket"):
 
     async def on_submit(self, interaction: discord.Interaction):
         guild = interaction.guild
-        category = guild.get_channel(TICKET_CATEGORY_ID)
+        config = await database.get_guild_config(str(guild.id)) or {}
+        category_id = int(config.get("support_category_id") or TICKET_CATEGORY_ID)
+        support_role_id = int(config.get("support_role_id") or SUPPORT_ROLE_ID)
+        category = guild.get_channel(category_id)
 
         # Anti-duplicate: block if user already has an open support ticket
         if category:
@@ -166,7 +173,7 @@ class SupportTicketModal(discord.ui.Modal, title="Create Support Ticket"):
                         )
                         return
 
-        support_role = guild.get_role(SUPPORT_ROLE_ID)
+        support_role = guild.get_role(support_role_id)
 
         overwrites = {
             guild.default_role: discord.PermissionOverwrite(view_channel=False),
@@ -265,7 +272,9 @@ class StaffApplicationModal(discord.ui.Modal, title="Staff Application"):
     )
 
     async def on_submit(self, interaction: discord.Interaction):
-        channel = interaction.guild.get_channel(APPLICATION_RESULT_CHANNEL_ID)
+        config = await database.get_guild_config(str(interaction.guild.id)) or {}
+        application_channel_id = int(config.get("application_result_channel_id") or APPLICATION_RESULT_CHANNEL_ID)
+        channel = interaction.guild.get_channel(application_channel_id)
         if not channel:
             await interaction.response.send_message("Application channel not found. Contact an admin.", ephemeral=True)
             return
@@ -368,6 +377,7 @@ class ApplicationResultView(discord.ui.View):
         orig.color = discord.Color.green()
         orig.add_field(name="✅ Approved by", value=interaction.user.mention, inline=False)
         await interaction.message.edit(embed=orig, view=None)
+        await record_audit(interaction.guild.id, interaction.user.id, "application.approved", target_id=int(user_id), details={"type": app_type})
         await interaction.response.send_message("✅ Application approved!", ephemeral=True)
 
     @discord.ui.button(label="Deny", style=discord.ButtonStyle.danger, custom_id="app_result_deny", emoji="❌")
@@ -392,6 +402,7 @@ class ApplicationResultView(discord.ui.View):
         orig.color = discord.Color.red()
         orig.add_field(name="❌ Denied by", value=interaction.user.mention, inline=False)
         await interaction.message.edit(embed=orig, view=None)
+        await record_audit(interaction.guild.id, interaction.user.id, "application.denied", target_id=int(user_id), details={"type": app_type})
         await interaction.response.send_message("❌ Application denied.", ephemeral=True)
 
     @discord.ui.button(label="Private Ticket", style=discord.ButtonStyle.secondary, custom_id="app_result_ticket", emoji="💬")
@@ -486,16 +497,19 @@ class LegacyTierPanelView(discord.ui.View):
 # ── Bot setup ─────────────────────────────────────────────────────────────────
 
 async def announce_latest_launcher_release(guild: discord.Guild) -> str:
-    channel = guild.get_channel(LAUNCHER_ANNOUNCEMENT_CHANNEL_ID)
+    config = await database.get_guild_config(str(guild.id)) or {}
+    announcement_channel_id = int(config.get("launcher_announcement_channel_id") or LAUNCHER_ANNOUNCEMENT_CHANNEL_ID)
+    announcement_role_id = int(config.get("launcher_announcement_role_id") or LAUNCHER_ANNOUNCEMENT_ROLE_ID)
+    channel = guild.get_channel(announcement_channel_id)
     if channel is None:
         try:
-            channel = await guild.fetch_channel(LAUNCHER_ANNOUNCEMENT_CHANNEL_ID)
+            channel = await guild.fetch_channel(announcement_channel_id)
         except (discord.NotFound, discord.Forbidden):
             return "announcement channel unavailable"
     if not isinstance(channel, discord.TextChannel):
         return "announcement destination is not a text channel"
 
-    role = guild.get_role(LAUNCHER_ANNOUNCEMENT_ROLE_ID)
+    role = guild.get_role(announcement_role_id)
     if role is None:
         return "announcement role not found"
 
@@ -862,10 +876,10 @@ async def sendapplication(interaction: discord.Interaction, channel: discord.Tex
     embed = discord.Embed(
         title="VANTA  /  TEAM APPLICATIONS",
         description=(
-            "### Build the community with us.\\n"
+            "### Build the community with us.\n"
             "Help users, improve the experience and support the Vanta ecosystem. "
-            "We are looking for thoughtful, reliable people who communicate clearly.\\n\\n"
-            "**What happens next**\\n"
+            "We are looking for thoughtful, reliable people who communicate clearly.\n\n"
+            "**What happens next**\n"
             "Submit the application below. The team reviews each submission and "
             "will contact you when a decision has been made."
         ),
@@ -891,12 +905,12 @@ async def sendsupportpanel(interaction: discord.Interaction, channel: discord.Te
     embed = discord.Embed(
         title="VANTA  /  SUPPORT CENTER",
         description=(
-            "### How can we help?\\n"
+            "### How can we help?\n"
             "Get direct help from the Vanta team. Create a private support room and "
-            "keep the full conversation in one place.\\n\\n"
-            "**A simple, tracked workflow**\\n"
-            "1. Open a ticket using the button below\\n"
-            "2. Describe the issue and include relevant details\\n"
+            "keep the full conversation in one place.\n\n"
+            "**A simple, tracked workflow**\n"
+            "1. Open a ticket using the button below\n"
+            "2. Describe the issue and include relevant details\n"
             "3. Our support team will pick it up and respond in your ticket"
         ),
         color=0x3978F6,
@@ -1091,7 +1105,7 @@ async def serverconfig(
         rendered = f"<@&{raw}>" if key.endswith("role_id") and raw else f"<#{raw}>" if raw else "Not configured (legacy default may apply)"
         lines.append(f"**{label}:** {rendered}")
     embed = discord.Embed(title="VANTA  /  SERVER CONFIGURATION",
-                          description="\\n".join(lines), color=0x3978F6)
+                          description="\n".join(lines), color=0x3978F6)
     embed.set_footer(text="Only server administrators can view or change this configuration")
     await interaction.followup.send(embed=embed, ephemeral=True)
 
@@ -1111,7 +1125,7 @@ async def auditlog(interaction: discord.Interaction, limit: app_commands.Range[i
             timestamp = int(datetime.fromisoformat(event["created_at"].replace("Z", "+00:00")).timestamp())
             target = f" → <@{event['target_id']}>" if event.get("target_id") else ""
             lines.append(f"<t:{timestamp}:R> **{discord.utils.escape_markdown(event['action'])}** · <@{event['actor_id']}>{target}")
-        embed.description = "\\n".join(lines)
+        embed.description = "\n".join(lines)
     embed.set_footer(text="Append-only operational events · Cloudflare D1")
     await interaction.followup.send(embed=embed, ephemeral=True)
 
