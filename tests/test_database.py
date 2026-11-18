@@ -84,3 +84,32 @@ class CloudflareDatabaseTests(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+    async def test_create_ticket_posts_persistent_record(self):
+        client, session = self.make_client(201, {"ticket": {"ticket_id": "1:2"}})
+        result = await client.create_support_ticket(
+            ticket_id="1:2", guild_id="123456789012345678",
+            channel_id="223456789012345678", owner_id="323456789012345678",
+            reason="Launcher crash", created_at="2026-11-18T10:00:00",
+        )
+        self.assertEqual(result["ticket_id"], "1:2")
+        self.assertEqual(session.calls[0][0], "POST")
+        self.assertTrue(session.calls[0][1].endswith("/v1/tickets"))
+
+    async def test_close_ticket_records_actor_and_timestamp(self):
+        client, session = self.make_client(200, {"ticket": {"status": "closed"}})
+        result = await client.close_support_ticket(
+            "223456789012345678", "323456789012345678", "2026-11-18T11:00:00"
+        )
+        self.assertEqual(result["status"], "closed")
+        self.assertEqual(session.calls[0][0], "PATCH")
+        self.assertEqual(session.calls[0][2]["json"]["closed_by"], "323456789012345678")
+
+    async def test_ticket_listing_encodes_filters(self):
+        client, session = self.make_client(200, {"tickets": [], "total": 0})
+        tickets, total = await client.list_support_tickets(
+            "123456789012345678", owner_id="323456789012345678", status="open"
+        )
+        self.assertEqual((tickets, total), ([], 0))
+        self.assertIn("owner_id=323456789012345678", session.calls[0][1])
