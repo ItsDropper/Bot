@@ -222,3 +222,97 @@ test("closes an open support ticket and records the closing actor", async () => 
     "2026-11-18T13:00:00", "323456789012345678", "223456789012345678",
   ]);
 });
+
+
+test("reads per-guild configuration through the authenticated API", async () => {
+  const config = { guild_id: "123456789012345678", support_role_id: "423456789012345678" };
+  const DB = fakeDb(config);
+  const token = "m".repeat(48);
+  const response = await worker.fetch(
+    new Request("https://worker.example/v1/guilds/123456789012345678/config", {
+      headers: { Authorization: `Bearer ${token}` },
+    }),
+    { DB, BOT_API_TOKEN: token },
+  );
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), { config });
+  assert.deepEqual(DB.calls[0].values, ["123456789012345678"]);
+});
+
+test("rejects malformed guild configuration without touching D1", async () => {
+  const DB = fakeDb();
+  const token = "n".repeat(48);
+  const response = await worker.fetch(
+    new Request("https://worker.example/v1/guilds/123456789012345678/config", {
+      method: "PUT",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        support_role_id: "not-a-discord-id",
+        updated_by: "323456789012345678",
+        updated_at: "2026-11-18T12:00:00",
+      }),
+    }),
+    { DB, BOT_API_TOKEN: token },
+  );
+  assert.equal(response.status, 400);
+  assert.equal(DB.calls.length, 0);
+});
+
+test("appends an immutable audit event using bound values", async () => {
+  const DB = fakeDb();
+  const token = "o".repeat(48);
+  const response = await worker.fetch(
+    new Request("https://worker.example/v1/audit-events", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        guild_id: "123456789012345678",
+        actor_id: "323456789012345678",
+        action: "ticket.created",
+        target_id: "223456789012345678",
+        details: { owner_id: "323456789012345678" },
+        created_at: "2026-11-18T12:00:00",
+      }),
+    }),
+    { DB, BOT_API_TOKEN: token },
+  );
+  assert.equal(response.status, 201);
+  assert.match(DB.calls[0].sql, /^INSERT INTO audit_events/);
+  assert.deepEqual(DB.calls[0].values.slice(0, 4), [
+    "123456789012345678", "323456789012345678", "ticket.created", "223456789012345678",
+  ]);
+});
+
+test("rejects oversized audit details before SQL", async () => {
+  const DB = fakeDb();
+  const token = "p".repeat(48);
+  const response = await worker.fetch(
+    new Request("https://worker.example/v1/audit-events", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        guild_id: "123456789012345678",
+        actor_id: "323456789012345678",
+        action: "ticket.created",
+        details: { content: "x".repeat(4000) },
+        created_at: "2026-11-18T12:00:00",
+      }),
+    }),
+    { DB, BOT_API_TOKEN: token },
+  );
+  assert.equal(response.status, 400);
+  assert.equal(DB.calls.length, 0);
+});
+
+test("lists audit events with a bounded guild-scoped query", async () => {
+  const DB = fakeDb();
+  const token = "q".repeat(48);
+  const response = await worker.fetch(
+    new Request("https://worker.example/v1/audit-events?guild_id=123456789012345678&limit=15", {
+      headers: { Authorization: `Bearer ${token}` },
+    }),
+    { DB, BOT_API_TOKEN: token },
+  );
+  assert.equal(response.status, 200);
+  assert.deepEqual(DB.calls[0].values, ["123456789012345678", 15, 0]);
+});
