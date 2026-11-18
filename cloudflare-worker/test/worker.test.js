@@ -21,6 +21,10 @@ function fakeDb(row = null) {
           calls.push({ sql, values: this.values });
           return { success: true };
         },
+        async all() {
+          calls.push({ sql, values: this.values });
+          return { results: [{ discord_id: "123456789012345678", mc_username: "Dropper", linked_at: "2026-11-18" }] };
+        },
       };
       return statement;
     },
@@ -76,5 +80,49 @@ test("does not execute SQL for malformed Discord IDs", async () => {
     { DB, BOT_API_TOKEN: token },
   );
   assert.equal(response.status, 404);
+  assert.equal(DB.calls.length, 0);
+});
+
+test("returns aggregate Minecraft link statistics", async () => {
+  const DB = fakeDb({ total: 7, first_linked_at: "2026-01-01", latest_linked_at: "2026-11-18" });
+  const token = "e".repeat(48);
+  const response = await worker.fetch(
+    new Request("https://worker.example/v1/minecraft-links/stats", {
+      headers: { Authorization: `Bearer ${token}` },
+    }),
+    { DB, BOT_API_TOKEN: token },
+  );
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), { stats: { total: 7, first_linked_at: "2026-01-01", latest_linked_at: "2026-11-18" } });
+  assert.match(DB.calls[0].sql, /COUNT/);
+});
+
+test("lists Minecraft links with parameterized pagination", async () => {
+  const DB = fakeDb({ total: 1 });
+  const token = "f".repeat(48);
+  const response = await worker.fetch(
+    new Request("https://worker.example/v1/minecraft-links?limit=25&offset=50", {
+      headers: { Authorization: `Bearer ${token}` },
+    }),
+    { DB, BOT_API_TOKEN: token },
+  );
+  assert.equal(response.status, 200);
+  const body = await response.json();
+  assert.equal(body.total, 1);
+  assert.equal(body.links.length, 1);
+  assert.deepEqual(DB.calls[0].values, [25, 50]);
+  assert.deepEqual(DB.calls[1].values, []);
+});
+
+test("rejects invalid Minecraft-link pagination", async () => {
+  const DB = fakeDb();
+  const token = "g".repeat(48);
+  const response = await worker.fetch(
+    new Request("https://worker.example/v1/minecraft-links?limit=100&offset=-1", {
+      headers: { Authorization: `Bearer ${token}` },
+    }),
+    { DB, BOT_API_TOKEN: token },
+  );
+  assert.equal(response.status, 400);
   assert.equal(DB.calls.length, 0);
 });
