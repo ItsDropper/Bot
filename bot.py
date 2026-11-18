@@ -236,7 +236,7 @@ class SupportPanelView(discord.ui.View):
 
     @discord.ui.button(
         label="Create Support Ticket",
-        style=discord.ButtonStyle.success,
+        style=discord.ButtonStyle.primary,
         custom_id="support_ticket_open",
         emoji="🎫"
     )
@@ -914,18 +914,20 @@ async def sendapplication(interaction: discord.Interaction, channel: discord.Tex
     embed = discord.Embed(
         title="VANTA  /  TEAM APPLICATIONS",
         description=(
-            "### Build the community with us.\n"
-            "Help users, improve the experience and support the Vanta ecosystem. "
-            "We are looking for thoughtful, reliable people who communicate clearly.\n\n"
-            "**What happens next**\n"
-            "Submit the application below. The team reviews each submission and "
-            "will contact you when a decision has been made."
+            "**Help build the Vanta community.**\n"
+            "Join the people who help users, improve the experience and support the Vanta ecosystem.\n\n"
+            "**01  /  APPLY**\n"
+            "Complete the private application form below.\n\n"
+            "**02  /  REVIEW**\n"
+            "Authorized staff review your answers.\n\n"
+            "**03  /  DECISION**\n"
+            "The team contacts you when a decision is made."
         ),
         color=0x3978F6,
     )
-    embed.add_field(name="🛡️  Community", value="Help keep the server welcoming, useful and well organized.", inline=True)
-    embed.add_field(name="🧰  Product support", value="Help users with Vanta Launcher and related projects.", inline=True)
-    embed.add_field(name="📋  Review process", value="Applications are reviewed by authorized staff.", inline=True)
+    embed.add_field(name="COMMUNITY", value="Keep the server welcoming, useful and well organized.", inline=False)
+    embed.add_field(name="PRODUCT SUPPORT", value="Help users with Vanta Launcher and other Vanta projects.", inline=False)
+    embed.add_field(name="EXPECTATIONS", value="Clear communication, reliability and a constructive attitude.", inline=False)
     embed.set_author(name="VANTA  •  COMMUNITY OPERATIONS")
     embed.set_footer(text="Vanta Staff  •  Applications are reviewed on an ongoing basis")
     embed.timestamp = datetime.utcnow()
@@ -942,19 +944,21 @@ async def sendsupportpanel(interaction: discord.Interaction, channel: discord.Te
     embed = discord.Embed(
         title="VANTA  /  SUPPORT CENTER",
         description=(
-            "### How can we help?\n"
-            "Get direct help from the Vanta team. Create a private support room and "
-            "keep the full conversation in one place.\n\n"
-            "**A simple, tracked workflow**\n"
-            "1. Open a ticket using the button below\n"
-            "2. Describe the issue and include relevant details\n"
-            "3. Our support team will pick it up and respond in your ticket"
+            "**Get help from the Vanta team.**\n"
+            "Open a private support conversation for launcher issues, account questions "
+            "or help with the Vanta ecosystem.\n\n"
+            "**01  /  OPEN**\n"
+            "Select the button below and describe what you need.\n\n"
+            "**02  /  REVIEW**\n"
+            "Support staff can assign and track your request.\n\n"
+            "**03  /  RESOLVE**\n"
+            "Keep updates and follow-up questions in one place."
         ),
         color=0x3978F6,
     )
-    embed.add_field(name="🔒  Private by default", value="Only you and authorized support staff can view your ticket.", inline=True)
-    embed.add_field(name="🧭  Clear ownership", value="Staff can assign tickets so requests do not get lost.", inline=True)
-    embed.add_field(name="📚  Persistent history", value="Ticket records are retained for support operations.", inline=True)
+    embed.add_field(name="PRIVATE BY DEFAULT", value="Only you and authorized support staff can view your ticket.", inline=False)
+    embed.add_field(name="TRACKED OWNERSHIP", value="Staff assignment keeps responsibility clear.", inline=False)
+    embed.add_field(name="PERSISTENT HISTORY", value="Ticket status and assignment history are stored in Vanta Bot.", inline=False)
     embed.set_author(name="VANTA  •  COMMUNITY OPERATIONS")
     embed.set_footer(text="Vanta Support  •  Select Create Support Ticket to begin")
     embed.timestamp = datetime.utcnow()
