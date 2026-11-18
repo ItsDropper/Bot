@@ -161,7 +161,7 @@ def register_ticket_commands(tree, database_provider, support_only, is_support_s
         embed.set_footer(text=f"{total} open ticket(s) · Showing up to 15 · Priority-first ordering")
         await interaction.followup.send(embed=embed, ephemeral=True)
 
-    @tree.command(name="ticketactivity", description="View staff notes and priority history for a support ticket")
+    @tree.command(name="ticketactivity", description="View ticket response, assignment, note and priority history")
     @app_commands.describe(channel="Support ticket to inspect")
     @app_commands.guild_only()
     @support_only()
@@ -197,8 +197,14 @@ def register_ticket_commands(tree, database_provider, support_only, is_support_s
                 elif action == "assignment_changed":
                     assignee_id = details.get("assigned_to")
                     summary = f"**Assigned to** · <@{assignee_id}>" if assignee_id else "**Ticket unassigned**"
-                else:
+                elif action == "customer_message":
+                    summary = "**Customer replied** · response timer restarted"
+                elif action == "staff_reply":
+                    summary = "**Staff response** · response recorded"
+                elif action == "priority_changed":
                     summary = f"**Priority changed** · {str(details.get('priority', 'unknown')).upper()}"
+                else:
+                    summary = f"**{discord.utils.escape_markdown(action.replace('_', ' ').title())}**"
                 timestamp = int(datetime.fromisoformat(event["created_at"].replace("Z", "+00:00")).timestamp())
                 lines.append(f"{summary}\n<t:{timestamp}:R> · <@{event['actor_id']}>")
             embed.description = "\n\n".join(lines)
