@@ -155,6 +155,7 @@ test("creates a support ticket using bound values", async () => {
   assert.deepEqual(DB.calls[0].values, [
     "123:456", "123456789012345678", "223456789012345678",
     "323456789012345678", "Launcher crash", "2026-11-18T10:00:00",
+    "2026-11-18T10:00:00",
   ]);
 });
 
