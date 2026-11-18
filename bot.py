@@ -861,6 +861,40 @@ async def forceunlink(interaction: discord.Interaction, user: discord.Member):
         return
     await interaction.response.send_message(f"✅ Unlinked `{row['mc_username']}` from {user.mention}.", ephemeral=True)
 
+
+@tree.command(name="ticketstats", description="Show persistent support ticket statistics")
+@support_only()
+async def ticketstats(interaction: discord.Interaction):
+    await interaction.response.defer(ephemeral=True)
+    stats = await database.get_support_ticket_stats(str(interaction.guild.id))
+    embed = discord.Embed(title="Support Operations", color=discord.Color.blurple())
+    embed.add_field(name="Total tickets", value=str(stats["total"]), inline=True)
+    embed.add_field(name="Open", value=str(stats["open"]), inline=True)
+    embed.add_field(name="Closed", value=str(stats["closed"]), inline=True)
+    embed.set_footer(text="Persistent records stored in Cloudflare D1")
+    await interaction.followup.send(embed=embed, ephemeral=True)
+
+
+@tree.command(name="mytickets", description="View your recent support ticket history")
+async def mytickets(interaction: discord.Interaction):
+    await interaction.response.defer(ephemeral=True)
+    tickets, total = await database.list_support_tickets(
+        str(interaction.guild.id), owner_id=str(interaction.user.id), status="all", limit=10
+    )
+    if not tickets:
+        await interaction.followup.send("You have no recorded support tickets in this server.", ephemeral=True)
+        return
+    lines = []
+    for ticket in tickets:
+        state = "Open" if ticket["status"] == "open" else "Closed"
+        channel = interaction.guild.get_channel(int(ticket["channel_id"]))
+        channel_text = channel.mention if channel else "Channel unavailable"
+        lines.append(f"{state} - {channel_text} - {ticket['created_at'][:10]}")
+    embed = discord.Embed(title="Your Support History", description="\n".join(lines), color=discord.Color.blurple())
+    embed.set_footer(text=f"{total} recorded ticket(s) - showing latest 10")
+    await interaction.followup.send(embed=embed, ephemeral=True)
+
+
 @tree.command(name="linkstats", description="Show Minecraft account-linking statistics")
 async def linkstats(interaction: discord.Interaction):
     await interaction.response.defer(ephemeral=True)
