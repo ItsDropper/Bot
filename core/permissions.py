@@ -10,7 +10,7 @@ class PermissionService:
         self._fallback_support_role_id = int(fallback_support_role_id)
 
     async def is_support_staff(self, member: discord.Member, guild: discord.Guild) -> bool:
-        if guild is None or not isinstance(member, discord.Member):
+        if guild is None or member is None:
             return False
         if member.guild_permissions.administrator:
             return True
