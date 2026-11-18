@@ -17,7 +17,7 @@ def register_moderation_commands(tree, database_provider, audit_recorder):
             raise DatabaseError("The database is not available")
         return ModerationService(database)
 
-    async def validate_target(interaction, target):
+    async def validate_target(interaction, target, *, require_bot_hierarchy=True):
         guild = interaction.guild
         actor = interaction.user
         bot_member = guild.me
@@ -27,7 +27,7 @@ def register_moderation_commands(tree, database_provider, audit_recorder):
         if actor.id != guild.owner_id and target.top_role >= actor.top_role:
             await interaction.response.send_message("You cannot moderate a member with an equal or higher role.", ephemeral=True)
             return False
-        if bot_member is None or target.top_role >= bot_member.top_role:
+        if require_bot_hierarchy and (bot_member is None or target.top_role >= bot_member.top_role):
             await interaction.response.send_message("My highest role must be above the target's highest role.", ephemeral=True)
             return False
         if target.id == actor.id:
@@ -49,21 +49,30 @@ def register_moderation_commands(tree, database_provider, audit_recorder):
             )
         except Exception as exc:
             print(f"Could not finalize moderation case {case.get('case_id')}: {type(exc).__name__}: {exc}")
-            raise
+            return False
+        return True
 
     async def report_failure(interaction, case, exc):
-        try:
-            await finish(case, "failed", f"{type(exc).__name__}: {exc}")
-        except Exception:
-            pass
-        message = "Discord rejected this moderation action. The failed attempt remains in the case history."
+        finalized = await finish(case, "failed", f"{type(exc).__name__}: {exc}")
+        message = (
+            f"Discord rejected the action. Failed attempt recorded as case #{case['case_id']}."
+            if finalized else
+            f"Discord rejected the action, but D1 could not finalize case #{case['case_id']}. It remains pending and needs review."
+        )
         if interaction.response.is_done():
             await interaction.followup.send(message, ephemeral=True)
         else:
             await interaction.response.send_message(message, ephemeral=True)
 
     async def report_success(interaction, case, target_label, extra=None):
-        await finish(case, "applied")
+        finalized = await finish(case, "applied")
+        if not finalized:
+            await interaction.followup.send(
+                f"The Discord action succeeded, but D1 could not finalize case #{case['case_id']}. "
+                "The case remains pending and requires staff review.",
+                ephemeral=True,
+            )
+            return
         await audit_recorder(
             interaction.guild.id, interaction.user.id, f"moderation.{case['action']}",
             target_id=int(case["target_id"]),
@@ -81,7 +90,7 @@ def register_moderation_commands(tree, database_provider, audit_recorder):
     @app_commands.checks.has_permissions(moderate_members=True)
     @app_commands.guild_only()
     async def warn(interaction: discord.Interaction, member: discord.Member, reason: app_commands.Range[str, 1, 512]):
-        if not await validate_target(interaction, member):
+        if not await validate_target(interaction, member, require_bot_hierarchy=False):
             return
         await interaction.response.defer(ephemeral=True)
         case = await create_pending(interaction, member.id, "warn", reason)
