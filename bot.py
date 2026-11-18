@@ -15,6 +15,11 @@ from core.permissions import PermissionService
 from cogs.moderation import register_moderation_commands
 from cogs.tickets import register_ticket_commands
 
+# Application-owned Vanta emoji: use the PartialEmoji object for components and
+# Discord's custom-emoji markup in embed text.
+VANTA_EMOJI = discord.PartialEmoji.from_str("<:1000043854:1572710659643285505>")
+VANTA_EMOJI_MARKUP = "<:1000043854:1572710659643285505>"
+
 settings = Settings.from_env()
 PORT = settings.port
 
@@ -198,7 +203,7 @@ class SupportTicketModal(discord.ui.Modal, title="Create Support Ticket"):
             return
 
         embed = discord.Embed(
-            title="NEW SUPPORT REQUEST",
+            title=f"{VANTA_EMOJI_MARKUP}  NEW SUPPORT REQUEST",
             description="A private support conversation has been opened.",
             color=0x3978F6,
         )
@@ -257,9 +262,9 @@ class SupportPanelView(discord.ui.View):
 
     @discord.ui.button(
         label="Create ticket",
-        style=discord.ButtonStyle.primary,
+        style=discord.ButtonStyle.secondary,
         custom_id="support_ticket_open",
-        emoji="🎫",
+        emoji=VANTA_EMOJI,
         row=1,
     )
     async def open_support_ticket(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -377,7 +382,7 @@ class StaffApplicationModal(discord.ui.Modal, title="Staff Application"):
         if not channel:
             await interaction.response.send_message("Application channel not found. Contact an admin.", ephemeral=True)
             return
-        embed = discord.Embed(title="🛡️ New Staff Application", color=0xFFAA00)
+        embed = discord.Embed(title=f"{VANTA_EMOJI_MARKUP}  NEW STAFF APPLICATION", color=0x3978F6)
         embed.set_thumbnail(url=interaction.user.display_avatar.url)
         embed.add_field(name="Applicant", value=f"{interaction.user.mention} (`{interaction.user.name}`)", inline=False)
         embed.add_field(name="Age", value=self.age.value, inline=True)
@@ -559,8 +564,8 @@ class ApplicationPanelView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
 
-    @discord.ui.button(label="Apply — Vanta Staff", style=discord.ButtonStyle.primary,
-                       custom_id="app_open_staff", emoji="🛡️")
+    @discord.ui.button(label="Apply — Vanta Staff", style=discord.ButtonStyle.secondary,
+                       custom_id="app_open_staff", emoji=VANTA_EMOJI)
     async def apply_staff(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_modal(StaffApplicationModal())
 
@@ -1041,7 +1046,7 @@ async def sendapplication(interaction: discord.Interaction, channel: discord.Tex
         await interaction.response.send_message("You need Administrator permission to use this.", ephemeral=True)
         return
     embed = discord.Embed(
-        title="VANTA  /  TEAM APPLICATIONS",
+        title=f"{VANTA_EMOJI_MARKUP}  VANTA  /  TEAM APPLICATIONS",
         description=(
             "**Help build the Vanta community.**\n"
             "Join the people who help users, improve the experience and support the Vanta ecosystem.\n\n"
@@ -1057,7 +1062,7 @@ async def sendapplication(interaction: discord.Interaction, channel: discord.Tex
     embed.add_field(name="COMMUNITY", value="Keep the server welcoming, useful and well organized.", inline=False)
     embed.add_field(name="PRODUCT SUPPORT", value="Help users with Vanta Launcher and other Vanta projects.", inline=False)
     embed.add_field(name="EXPECTATIONS", value="Clear communication, reliability and a constructive attitude.", inline=False)
-    embed.set_author(name="VANTA  •  COMMUNITY OPERATIONS")
+    embed.set_author(name=f"{VANTA_EMOJI_MARKUP}  VANTA  •  COMMUNITY OPERATIONS")
     embed.set_footer(text="Vanta Staff  •  Applications are reviewed on an ongoing basis")
     embed.timestamp = datetime.utcnow()
     await channel.send(embed=embed, view=ApplicationPanelView())
@@ -1071,7 +1076,7 @@ async def sendsupportpanel(interaction: discord.Interaction, channel: discord.Te
     channel = channel or interaction.channel
 
     embed = discord.Embed(
-        title="VANTA  /  SUPPORT CENTER",
+        title=f"{VANTA_EMOJI_MARKUP}  VANTA  /  SUPPORT CENTER",
         description=(
             "Dedicated help for Vanta Launcher, account access, mod compatibility "
             "and the wider Vanta ecosystem.\n\n"
@@ -1080,7 +1085,7 @@ async def sendsupportpanel(interaction: discord.Interaction, channel: discord.Te
         ),
         color=0x3978F6,
     )
-    embed.set_author(name="VANTA  •  CUSTOMER SUPPORT")
+    embed.set_author(name=f"{VANTA_EMOJI_MARKUP}  VANTA  •  CUSTOMER SUPPORT")
     embed.add_field(
         name="01  ·  OPEN A REQUEST",
         value="Select the closest topic and describe the issue. Include versions and error details when relevant.",
