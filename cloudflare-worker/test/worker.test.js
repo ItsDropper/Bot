@@ -7,14 +7,22 @@ function fakeDb(row = null) {
   return {
     calls,
     prepare(sql) {
-      return {
+      const statement = {
+        values: [],
         bind(...values) {
-          return {
-            async first() { calls.push({ sql, values }); return row; },
-            async run() { calls.push({ sql, values }); return { success: true }; },
-          };
+          this.values = values;
+          return this;
+        },
+        async first() {
+          calls.push({ sql, values: this.values });
+          return row;
+        },
+        async run() {
+          calls.push({ sql, values: this.values });
+          return { success: true };
         },
       };
+      return statement;
     },
   };
 }
