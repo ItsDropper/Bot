@@ -115,3 +115,18 @@ class CloudflareDatabase:
             allow_missing=True,
         )
         return result.get("link") if result else None
+
+
+    async def get_minecraft_link_stats(self):
+        result = await self._request("GET", "/v1/minecraft-links/stats")
+        return result["stats"]
+
+    async def list_minecraft_links(self, *, limit: int = 10, offset: int = 0):
+        if not 1 <= limit <= 25:
+            raise ValueError("Minecraft link page size must be between 1 and 25")
+        if offset < 0:
+            raise ValueError("Minecraft link offset cannot be negative")
+        result = await self._request(
+            "GET", f"/v1/minecraft-links?limit={limit}&offset={offset}"
+        )
+        return result["links"], result["total"]
