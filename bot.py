@@ -139,6 +139,14 @@ async def _create_support_ticket(
     persisted_details: str | None = None,
     technical_fields: list[tuple[str, str]] | None = None,
 ):
+    ticket_reason = f"[{topic}] {persisted_details if persisted_details is not None else details}"
+    if len(ticket_reason) > 1000:
+        await interaction.response.send_message(
+            "The support report is too long. Shorten the details or log link and submit again.",
+            ephemeral=True,
+        )
+        return
+
     guild = interaction.guild
     config = await database.get_guild_config(str(guild.id)) or {}
     category_id = int(config.get("support_category_id") or TICKET_CATEGORY_ID)
@@ -180,13 +188,6 @@ async def _create_support_ticket(
         overwrites=overwrites,
         topic=f"vanta_ticket_owner:{interaction.user.id}"
     )
-    ticket_reason = f"[{topic}] {persisted_details if persisted_details is not None else details}"
-    if len(ticket_reason) > 1000:
-        await interaction.response.send_message(
-            "The support report is too long. Shorten the details or log link and submit again.",
-            ephemeral=True,
-        )
-        return
     try:
         await database.create_support_ticket(
             ticket_id=f"{guild.id}:{channel.id}",
