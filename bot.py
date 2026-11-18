@@ -17,8 +17,8 @@ from cogs.tickets import register_ticket_commands
 
 # Application-owned Vanta emoji: use the PartialEmoji object for components and
 # Discord's custom-emoji markup in embed text.
-VANTA_EMOJI = discord.PartialEmoji.from_str("<:1000043854:1572710659643285505>")
-VANTA_EMOJI_MARKUP = "<:1000043854:1572710659643285505>"
+VANTA_EMOJI = discord.PartialEmoji.from_str("<:1000043856:1572713589750501617>")
+VANTA_EMOJI_MARKUP = "<:1000043856:1572713589750501617>"
 
 settings = Settings.from_env()
 PORT = settings.port
