@@ -1,5 +1,6 @@
 import os
 import asyncio
+import re
 from datetime import datetime
 import discord
 from discord import app_commands
@@ -740,6 +741,13 @@ async def link(interaction: discord.Interaction, minecraft_username: str):
 @app_commands.describe(user="The Discord user to check (leave empty to check yourself)")
 async def checklink(interaction: discord.Interaction, user: discord.Member = None):
     target = user or interaction.user
+    if user and user.id != interaction.user.id:
+        support_role = interaction.guild.get_role(SUPPORT_ROLE_ID)
+        if not interaction.user.guild_permissions.administrator and (not support_role or support_role not in interaction.user.roles):
+            await interaction.response.send_message(
+                "Only support staff can inspect another member's Minecraft link.", ephemeral=True
+            )
+            return
     row = await database.get_minecraft_link(str(target.id))
     if not row:
         msg = ("You haven't linked a Minecraft account yet. Use `/link` to link one."
@@ -790,6 +798,72 @@ async def forceunlink(interaction: discord.Interaction, user: discord.Member):
         await interaction.response.send_message(f"{user.mention} doesn't have a Minecraft account linked.", ephemeral=True)
         return
     await interaction.response.send_message(f"✅ Unlinked `{row['mc_username']}` from {user.mention}.", ephemeral=True)
+
+@tree.command(name="linkstats", description="Show Minecraft account-linking statistics")
+async def linkstats(interaction: discord.Interaction):
+    await interaction.response.defer(ephemeral=True)
+    stats = await database.get_minecraft_link_stats()
+    total = int(stats.get("total") or 0)
+    embed = discord.Embed(title="Minecraft Linking Statistics", color=discord.Color.blurple())
+    embed.add_field(name="Linked accounts", value=f"`{total:,}`", inline=True)
+    if stats.get("first_linked_at"):
+        embed.add_field(name="First link", value=stats["first_linked_at"][:10], inline=True)
+    if stats.get("latest_linked_at"):
+        embed.add_field(name="Latest link", value=stats["latest_linked_at"][:10], inline=True)
+    embed.set_footer(text="Live counts from Cloudflare D1")
+    await interaction.followup.send(embed=embed, ephemeral=True)
+
+
+@tree.command(name="linkedusers", description="Browse registered Minecraft links (support staff)")
+@app_commands.describe(page="Page number (25 accounts per page)")
+@support_only()
+async def linkedusers(interaction: discord.Interaction, page: app_commands.Range[int, 1, 4000] = 1):
+    await interaction.response.defer(ephemeral=True)
+    limit = 25
+    offset = (page - 1) * limit
+    rows, total = await database.list_minecraft_links(limit=limit, offset=offset)
+    if not rows:
+        await interaction.followup.send(
+            f"No linked accounts on page {page}. There are {total:,} linked accounts in total.",
+            ephemeral=True
+        )
+        return
+    lines = []
+    for row in rows:
+        member = interaction.guild.get_member(int(row["discord_id"]))
+        discord_label = member.mention if member else f"`{row['discord_id']}`"
+        lines.append(f"{discord_label} — **{discord.utils.escape_markdown(row['mc_username'])}**")
+    pages = max(1, (total + limit - 1) // limit)
+    embed = discord.Embed(
+        title=f"Minecraft Accounts · Page {page}/{pages}",
+        description="\n".join(lines),
+        color=discord.Color.blurple()
+    )
+    embed.set_footer(text=f"{total:,} total linked accounts · Newest links first")
+    await interaction.followup.send(embed=embed, ephemeral=True)
+
+
+@tree.command(name="lookupmc", description="Find the Discord account linked to a Minecraft username")
+@app_commands.describe(minecraft_username="Minecraft username to look up")
+@support_only()
+async def lookupmc(interaction: discord.Interaction, minecraft_username: str):
+    if not re.fullmatch(r"[A-Za-z0-9_]{1,16}", minecraft_username):
+        await interaction.response.send_message("Enter a valid Minecraft username (1–16 letters, numbers or underscores).", ephemeral=True)
+        return
+    await interaction.response.defer(ephemeral=True)
+    row = await database.get_minecraft_link_by_username(minecraft_username)
+    if not row:
+        await interaction.followup.send(f"No Discord account is linked to `{discord.utils.escape_markdown(minecraft_username)}`.", ephemeral=True)
+        return
+    member = interaction.guild.get_member(int(row["discord_id"]))
+    owner = member.mention if member else f"`{row['discord_id']}` (not currently in this server)"
+    embed = discord.Embed(title="Minecraft Account Lookup", color=discord.Color.green())
+    embed.add_field(name="Minecraft username", value=f"`{discord.utils.escape_markdown(row['mc_username'])}`", inline=True)
+    embed.add_field(name="Linked Discord account", value=owner, inline=True)
+    embed.add_field(name="Linked on", value=row["linked_at"][:10], inline=True)
+    await interaction.followup.send(embed=embed, ephemeral=True)
+
+
 # ── HTTP health endpoint ──────────────────────────────────────────────────────
 
 async def health(request):
