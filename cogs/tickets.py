@@ -79,7 +79,7 @@ def register_ticket_commands(tree, database_provider, support_only, audit_record
         )
 
     @tree.command(name="ticketqueue", description="View the prioritized open support ticket queue")
-    @app_commands.checks.guild_only()
+    @app_commands.guild_only()
     @support_only()
     async def ticketqueue(interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)
