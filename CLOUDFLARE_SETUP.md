@@ -1,112 +1,104 @@
 # Cloudflare D1 setup for the Vanta Discord bot
 
-The Python bot stays on its current host (for example, Render). A small Cloudflare Worker exposes only the Minecraft-link operations the bot needs; the Worker accesses D1 through a private binding. The bot cannot submit arbitrary SQL and does not need a Cloudflare account API token.
+The Discord bot remains a Python application hosted on **Render**. UptimeRobot continues monitoring the Render service. Cloudflare hosts only a small Worker API and the D1 database; it does not run the Discord bot or connect to the Discord Gateway.
 
-**Deployment order matters:** the updated bot now requires both Cloudflare environment variables at startup. If your host auto-deploys from `main`, configure and deploy the Worker, then add the two bot environment variables before restarting the bot. Until then, the new bot process will exit rather than silently use the old PostgreSQL database.
+The Worker exposes only the Minecraft-link operations the bot needs. It accesses D1 through a private binding, and the bot cannot submit arbitrary SQL.
 
-## 1. Create the D1 database
+## 1. Add GitHub repository secrets
 
-Requirements: a Cloudflare account and Node.js/npm on your computer.
+In the Bot repository, open **Settings → Secrets and variables → Actions → New repository secret**.
 
-From the repository root:
+Create these three secrets:
 
-```powershell
-cd cloudflare-worker
-npx wrangler login
-npx wrangler d1 create vanta-discord
-```
+| Secret | Value |
+|---|---|
+| `CLOUDFLARE_ACCOUNT_ID` | Your Cloudflare account ID |
+| `CLOUDFLARE_API_TOKEN` | Cloudflare API token described below |
+| `CLOUDFLARE_BOT_API_TOKEN` | A long random secret shared only with the Worker and Render bot |
 
-Wrangler prints a database UUID. Replace the all-zero `database_id` value in `wrangler.toml` with that UUID. Keep the binding name `DB` and database name `vanta-discord`.
+Create the Cloudflare API token in the Cloudflare dashboard under **My Profile → API Tokens**. Use a custom token scoped to the relevant account with:
+- **D1: Edit**
+- **Workers Scripts: Edit**
 
-## 2. Apply the schema
+Restrict the token to your Cloudflare account. It is used only by GitHub Actions to provision D1, apply migrations, set the Worker secret, and deploy the Worker. It is not needed by the running bot.
 
-From `cloudflare-worker`:
-
-```powershell
-npx wrangler d1 migrations apply vanta-discord --remote
-```
-
-This creates the `minecraft_links` table with case-insensitive username uniqueness.
-
-## 3. Create the Worker secret and deploy
-
-Generate a strong random secret locally:
+Generate the bot-to-Worker secret locally, for example in PowerShell:
 
 ```powershell
 python -c "import secrets; print(secrets.token_urlsafe(48))"
 ```
 
-Keep the generated value safe. Set it as a Worker secret:
+Put that value in the `CLOUDFLARE_BOT_API_TOKEN` GitHub secret. Do not put either secret in source code, workflow files, or chat.
 
-```powershell
-npx wrangler secret put BOT_API_TOKEN
-```
+## 2. Run the deployment workflow
 
-Paste the generated value when Wrangler prompts, then deploy:
+Open **Actions → Deploy Cloudflare D1 API → Run workflow** and run it on `main`.
 
-```powershell
-npx wrangler deploy
-```
+The workflow will:
+1. Find the D1 database named `vanta-discord`, creating it if it does not exist.
+2. Inject its ID into Wrangler's temporary CI checkout (it does not commit generated IDs).
+3. Apply pending SQL migrations to the remote D1 database.
+4. Set the Worker-side `BOT_API_TOKEN` secret.
+5. Deploy the `vanta-discord-db` Worker.
+6. Print the Worker URL and Render environment-variable instructions in the workflow summary.
 
-Copy the deployed Worker URL, for example `https://vanta-discord-db.<your-subdomain>.workers.dev`.
+It is safe to run again: database creation is idempotent, and D1 migrations only apply migrations not already recorded as applied.
+
+The workflow also runs automatically when files under `cloudflare-worker/`, the provisioning script, or this workflow change on `main`.
+
+## 3. Configure Render
+
+After the workflow succeeds, open its summary and copy the Worker URL. Add these environment variables to the existing **Render bot service**:
+
+| Variable | Value |
+|---|---|
+| `CLOUDFLARE_WORKER_URL` | Worker URL from the Actions summary |
+| `CLOUDFLARE_BOT_API_TOKEN` | The exact same random secret stored in GitHub |
+
+Keep `DISCORD_BOT_TOKEN` and your existing Render port configuration. Do not move the bot to Cloudflare. UptimeRobot should continue monitoring the Render health endpoint, not the database Worker.
+
+The new bot version requires the two Cloudflare variables at startup. Configure them before allowing Render to restart onto the new bot version.
 
 ## 4. Migrate existing Minecraft links
 
-Do this before removing the old PostgreSQL `DATABASE_URL`. The exporter migrates only `minecraft_links`. Tier history, tester sessions, player notes, and other tier-specific records are intentionally not migrated because the tier system is being retired.
+Provisioning the empty database and schema does **not** migrate records from the old PostgreSQL database. Keep the old database and its `DATABASE_URL` until this one-time migration is complete.
 
-From the repository root, install the one-time migration dependency:
+From the repository root, install the isolated migration dependency:
 
 ```powershell
 python -m pip install -r migration-requirements.txt
 ```
 
-Set `DATABASE_URL` in your local PowerShell session to the existing PostgreSQL connection string (do not paste it into chat or commit it), then run:
+Set the old PostgreSQL URL locally (do not commit it or paste it into chat):
 
 ```powershell
+$env:DATABASE_URL = "YOUR_EXISTING_POSTGRES_CONNECTION_STRING"
 python scripts/export_minecraft_links.py
 ```
 
-This creates `minecraft_links_export.sql` in the repository root. It validates Discord IDs and Minecraft usernames and aborts if case-insensitive duplicate Minecraft names exist. The export contains private user data; do not commit or share it.
+This creates `minecraft_links_export.sql`. The export contains private user data; do not commit or share it.
 
-Import it into D1:
+Import it:
 
 ```powershell
 cd cloudflare-worker
 npx wrangler d1 execute vanta-discord --remote --file=../minecraft_links_export.sql
-```
-
-Verify the count:
-
-```powershell
 npx wrangler d1 execute vanta-discord --remote --command="SELECT COUNT(*) AS links FROM minecraft_links"
 ```
 
-Compare that count with the export script's reported row count. Keep the PostgreSQL database intact until the migrated links have been verified and the bot is running against D1.
+Compare the D1 count with the exporter row count. Do not delete the old PostgreSQL database until the count and live bot behaviour have been verified.
 
-## 5. Configure the bot host
+## 5. Verify in Discord
 
-In the bot host's environment settings, add:
-
-| Variable | Value |
-|---|---|
-| `CLOUDFLARE_WORKER_URL` | Deployed Worker URL, without a trailing slash |
-| `CLOUDFLARE_BOT_API_TOKEN` | The exact secret entered for `BOT_API_TOKEN` |
-| `DISCORD_BOT_TOKEN` | Keep the existing Discord bot token |
-| `PORT` | Keep the existing host-provided port configuration |
-
-After deployment, run `/healthcheck`. Once it reports Cloudflare D1 as healthy and the migrated links work, remove the old `DATABASE_URL` from the bot host. Do not delete the old database until you have a separate backup and have completed verification.
-
-## 6. Verify in Discord
-
-- Run `/healthcheck`; the database field should report Cloudflare D1.
-- Test `/mylink` and `/checklink` using a migrated account.
+- Run `/healthcheck`; the database should report Cloudflare D1.
+- Test `/mylink` and `/checklink` with a migrated account.
 - Test `/link`, `/unlink`, `/forcelink`, and `/forceunlink`.
-- Run `/sendapplication` again and replace the old application panel.
-- Remove the old tier-testing panel; its buttons now return a retirement message.
+- Replace the old application panel using `/sendapplication`.
 
 ## Security and operations
 
 - Only the Worker talks to D1. Its API exposes specific operations, not arbitrary SQL.
-- The bot's shared secret is a Worker secret, not a Cloudflare account API token.
-- Add future schema changes as numbered SQL files under `migrations/`, then apply them with Wrangler.
-- Keep the export SQL and generated secret out of Git.
+- The Cloudflare API token stays in GitHub Actions and is not a Render environment variable.
+- The bot-to-Worker token is stored as a GitHub secret, a Worker secret, and a Render environment variable.
+- Add future schema changes as numbered SQL files under `cloudflare-worker/migrations/`.
+- Keep SQL exports and generated secrets out of Git.
