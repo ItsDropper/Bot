@@ -61,6 +61,22 @@ class CloudflareDatabaseTests(unittest.IsolatedAsyncioTestCase):
             await client.upsert_minecraft_link("123456789012345678", "invalid name", "2026-11-18T10:00:00")
         self.assertEqual(session.calls, [])
 
+    async def test_link_stats_endpoint(self):
+        client, session = self.make_client(200, {"stats": {"total": 12}})
+        self.assertEqual(await client.get_minecraft_link_stats(), {"total": 12})
+        self.assertTrue(session.calls[0][1].endswith("/v1/minecraft-links/stats"))
+
+    async def test_list_links_uses_bounded_pagination(self):
+        links = [{"discord_id": "123456789012345678", "mc_username": "Dropper", "linked_at": "2026-11-18"}]
+        client, session = self.make_client(200, {"links": links, "total": 1})
+        self.assertEqual(await client.list_minecraft_links(limit=25, offset=50), (links, 1))
+        self.assertTrue(session.calls[0][1].endswith("/v1/minecraft-links?limit=25&offset=50"))
+
+    async def test_list_links_rejects_invalid_page_size(self):
+        client, session = self.make_client(200, {"links": [], "total": 0})
+        with self.assertRaises(ValueError):
+            await client.list_minecraft_links(limit=26, offset=0)
+        self.assertEqual(session.calls, [])
     def test_worker_url_must_use_https(self):
         with self.assertRaises(ValueError):
             CloudflareDatabase("http://public.example", "x" * 48)
