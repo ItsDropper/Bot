@@ -102,8 +102,10 @@ class CloseSupportTicketView(discord.ui.View):
                     str(interaction.channel.id), str(interaction.user.id), datetime.utcnow().isoformat()
                 )
             except DatabaseError as exc:
-                await interaction.followup.send(f"Could not close ticket safely: {exc}", ephemeral=True)
-                return
+                if str(exc) != "Ticket not found":
+                    await interaction.followup.send(f"Could not close ticket safely: {exc}", ephemeral=True)
+                    return
+                print(f"Closing legacy ticket {interaction.channel.id} without a D1 record.")
         if TICKET_LOG_CHANNEL_ID:
             log_channel = interaction.guild.get_channel(TICKET_LOG_CHANNEL_ID)
             if log_channel:
