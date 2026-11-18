@@ -532,7 +532,7 @@ async def announce_latest_launcher_release(guild: discord.Guild) -> str:
         notes = notes[:2997].rstrip() + "..."
     embed = discord.Embed(
         title=title,
-        description=f"{notes}\\n\\n[Download Vanta Launcher and view release details]({release_url})",
+        description=f"{notes}\n\n[Download Vanta Launcher and view release details]({release_url})",
         url=release_url,
         color=0x3978F6,
     )
