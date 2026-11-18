@@ -43,27 +43,25 @@ jobs:
         run: npx --yes wrangler@4 d1 migrations apply vanta-discord --remote
 
       - name: Migrate existing Minecraft links from PostgreSQL
-        if: ${{ secrets.LEGACY_DATABASE_URL != '' }}
         working-directory: cloudflare-worker
         env:
           DATABASE_URL: ${{ secrets.LEGACY_DATABASE_URL }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
         run: |
+          if [ -z "${DATABASE_URL:-}" ]; then
+            {
+              echo "## Legacy Minecraft-link migration skipped"
+              echo
+              echo "No LEGACY_DATABASE_URL secret is configured. Existing PostgreSQL Minecraft links have not been copied."
+              echo "Add LEGACY_DATABASE_URL using the old PostgreSQL database's external connection URL and rerun this workflow to migrate them."
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
           python -m pip install --disable-pip-version-check -r ../migration-requirements.txt
           python ../scripts/export_minecraft_links.py --output "$RUNNER_TEMP/minecraft_links_export.sql"
           npx --yes wrangler@4 d1 execute vanta-discord --remote --file="$RUNNER_TEMP/minecraft_links_export.sql"
           npx --yes wrangler@4 d1 execute vanta-discord --remote --command="SELECT COUNT(*) AS migrated_minecraft_links FROM minecraft_links"
-
-      - name: Explain skipped legacy migration
-        if: ${{ secrets.LEGACY_DATABASE_URL == '' }}
-        run: |
-          {
-            echo "## Legacy Minecraft-link migration skipped"
-            echo
-            echo "No LEGACY_DATABASE_URL GitHub secret is configured. The D1 database and Worker are deployed, but existing PostgreSQL Minecraft links have not been copied."
-            echo "Add LEGACY_DATABASE_URL using the old PostgreSQL database's external connection URL and rerun this workflow to migrate them."
-          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Set Worker API authentication secret
         working-directory: cloudflare-worker
