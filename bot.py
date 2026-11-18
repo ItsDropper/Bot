@@ -660,7 +660,7 @@ async def reconcile_ticket_close_controls(guild: discord.Guild):
 client = Client(intents=intents)
 tree = app_commands.CommandTree(client)
 register_moderation_commands(tree, lambda: database, record_audit)
-register_ticket_commands(tree, lambda: database, support_only)
+register_ticket_commands(tree, lambda: database, support_only, record_audit)
 
 @client.event
 async def on_guild_join(guild):
