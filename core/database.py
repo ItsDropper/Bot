@@ -164,3 +164,16 @@ class CloudflareDatabase:
             "GET", f"/v1/tickets/stats?guild_id={quote(str(guild_id), safe='')}"
         )
         return result["stats"]
+
+
+    async def assign_support_ticket(self, channel_id: str, assigned_to: str,
+                                    assigned_by: str, assigned_at: str):
+        result = await self._request(
+            "PATCH", f"/v1/tickets/channel/{quote(str(channel_id), safe='')}/assign",
+            payload={
+                "assigned_to": str(assigned_to),
+                "assigned_by": str(assigned_by),
+                "assigned_at": assigned_at,
+            },
+        )
+        return result["ticket"]
