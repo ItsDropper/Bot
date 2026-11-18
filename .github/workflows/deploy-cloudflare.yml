@@ -1,0 +1,82 @@
+name: Deploy Cloudflare D1 API
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "cloudflare-worker/**"
+      - "scripts/provision_cloudflare.py"
+      - ".github/workflows/deploy-cloudflare.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cloudflare-d1-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Provision D1 database and configure Wrangler
+        env:
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          python scripts/provision_cloudflare.py
+
+      - name: Apply D1 migrations
+        working-directory: cloudflare-worker
+        run: npx --yes wrangler@4 d1 migrations apply vanta-discord --remote
+
+      - name: Set Worker API authentication secret
+        working-directory: cloudflare-worker
+        env:
+          CLOUDFLARE_BOT_API_TOKEN: ${{ secrets.CLOUDFLARE_BOT_API_TOKEN }}
+        run: |
+          if [ "${#CLOUDFLARE_BOT_API_TOKEN}" -lt 32 ]; then
+            echo "::error::CLOUDFLARE_BOT_API_TOKEN must be at least 32 characters."
+            exit 1
+          fi
+          printf '%s' "$CLOUDFLARE_BOT_API_TOKEN" | npx --yes wrangler@4 secret put BOT_API_TOKEN
+
+      - name: Deploy Cloudflare Worker
+        id: deploy
+        working-directory: cloudflare-worker
+        run: |
+          set -o pipefail
+          npx --yes wrangler@4 deploy 2>&1 | tee /tmp/wrangler-deploy.log
+          WORKER_URL="$(grep -Eo 'https://[A-Za-z0-9.-]+\.workers\.dev' /tmp/wrangler-deploy.log | tail -n 1 || true)"
+          if [ -n "$WORKER_URL" ]; then
+            echo "worker_url=$WORKER_URL" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Publish Render configuration instructions
+        env:
+          WORKER_URL: ${{ steps.deploy.outputs.worker_url }}
+        run: |
+          {
+            echo "## Cloudflare Worker deployed"
+            echo
+            if [ -n "$WORKER_URL" ]; then
+              echo "Set `CLOUDFLARE_WORKER_URL` in your Render service to:"
+              echo
+              echo "`$WORKER_URL`"
+            else
+              echo "Deployment succeeded. Copy the `.workers.dev` URL from the deploy step logs and set it as `CLOUDFLARE_WORKER_URL` in Render."
+            fi
+            echo
+            echo "Also set `CLOUDFLARE_BOT_API_TOKEN` in Render to the same GitHub secret used for the Worker secret."
+            echo
+            echo "The Discord bot remains hosted on Render. This workflow deploys only the database API Worker."
+          } >> "$GITHUB_STEP_SUMMARY"
