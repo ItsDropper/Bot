@@ -329,6 +329,7 @@ class DenyReasonModal(discord.ui.Modal, title="Deny with Reason"):
         orig.color = discord.Color.red()
         orig.add_field(name="❌ Denied by", value=f"{interaction.user.mention}\n**Reason:** {reason}", inline=False)
         await self.original_message.edit(embed=orig, view=None)
+        await record_audit(interaction.guild.id, interaction.user.id, "application.denied", target_id=int(self.applicant_id), details={"type": self.app_type, "reason": reason})
         await interaction.response.send_message("❌ Application denied with reason sent.", ephemeral=True)
 
 
@@ -421,7 +422,9 @@ class ApplicationResultView(discord.ui.View):
             except discord.NotFound:
                 await interaction.response.send_message("Applicant is no longer in the server.", ephemeral=True)
                 return
-        category = interaction.guild.get_channel(TICKET_CATEGORY_ID)
+        config = await database.get_guild_config(str(interaction.guild.id)) or {}
+        category_id = int(config.get("support_category_id") or TICKET_CATEGORY_ID)
+        category = interaction.guild.get_channel(category_id)
         overwrites = {
             interaction.guild.default_role: discord.PermissionOverwrite(view_channel=False),
             member: discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True),
@@ -622,7 +625,9 @@ class Client(discord.Client):
 
 async def reconcile_ticket_close_controls(guild: discord.Guild):
     """Replace old ticket messages that exposed both close controls with one control."""
-    category = guild.get_channel(TICKET_CATEGORY_ID)
+    config = await database.get_guild_config(str(guild.id)) or {}
+    category_id = int(config.get("support_category_id") or TICKET_CATEGORY_ID)
+    category = guild.get_channel(category_id)
     if not isinstance(category, discord.CategoryChannel):
         return
     updated = 0
@@ -992,8 +997,7 @@ async def link(interaction: discord.Interaction, minecraft_username: str):
 async def checklink(interaction: discord.Interaction, user: discord.Member = None):
     target = user or interaction.user
     if user and user.id != interaction.user.id:
-        support_role = interaction.guild.get_role(SUPPORT_ROLE_ID)
-        if not interaction.user.guild_permissions.administrator and (not support_role or support_role not in interaction.user.roles):
+        if not await is_support_staff(interaction.user, interaction.guild):
             await interaction.response.send_message(
                 "Only support staff can inspect another member's Minecraft link.", ephemeral=True
             )
@@ -1181,8 +1185,7 @@ async def auditlog(interaction: discord.Interaction, limit: app_commands.Range[i
 @app_commands.describe(channel="The support ticket channel", staff="Support staff member taking ownership")
 @support_only()
 async def ticketassign(interaction: discord.Interaction, channel: discord.TextChannel, staff: discord.Member):
-    support_role = interaction.guild.get_role(SUPPORT_ROLE_ID)
-    if not staff.guild_permissions.administrator and (not support_role or support_role not in staff.roles):
+    if not await is_support_staff(staff, interaction.guild):
         await interaction.response.send_message("The assignee must be a support staff member or administrator.", ephemeral=True)
         return
     if not channel.name.startswith("support-"):
