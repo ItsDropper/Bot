@@ -213,7 +213,7 @@ async function handle(request, env) {
     return json({ stats: { total: stats.total || 0, open: stats.open || 0, closed: stats.closed || 0 } });
   }
 
-  const ticketActivityMatch = path.match(/^\/v1\/tickets\/channel\/([0-9]{15,22})\\/activity$/);
+  const ticketActivityMatch = path.match(/^\/v1\/tickets\/channel\/([0-9]{15,22})\/activity$/);
   if (ticketActivityMatch && request.method === "GET") {
     const url = new URL(request.url);
     const guildId = url.searchParams.get("guild_id") || "";
@@ -231,7 +231,7 @@ async function handle(request, env) {
     return json({ events: rows.results || [] });
   }
 
-  const ticketNoteMatch = path.match(/^\/v1\/tickets\/channel\/([0-9]{15,22})\\/notes$/);
+  const ticketNoteMatch = path.match(/^\/v1\/tickets\/channel\/([0-9]{15,22})\/notes$/);
   if (ticketNoteMatch && request.method === "POST") {
     let body;
     try { body = await readJson(request); } catch { return json({ error: "Invalid JSON request body" }, 400); }
@@ -251,7 +251,7 @@ async function handle(request, env) {
     return json({ event }, 201);
   }
 
-  const ticketPriorityMatch = path.match(/^\/v1\/tickets\/channel\/([0-9]{15,22})\\/priority$/);
+  const ticketPriorityMatch = path.match(/^\/v1\/tickets\/channel\/([0-9]{15,22})\/priority$/);
   if (ticketPriorityMatch && request.method === "PATCH") {
     let body;
     try { body = await readJson(request); } catch { return json({ error: "Invalid JSON request body" }, 400); }
