@@ -116,12 +116,16 @@ class CloudflareDatabaseTests(unittest.IsolatedAsyncioTestCase):
     async def test_ticket_assignment_records_staff_and_actor(self):
         client, session = self.make_client(200, {"ticket": {"assigned_to": "423456789012345678"}})
         result = await client.assign_support_ticket(
-            "223456789012345678", "423456789012345678",
-            "323456789012345678", "2026-11-18T12:00:00",
+            guild_id="123456789012345678",
+            channel_id="223456789012345678",
+            assigned_to="423456789012345678",
+            assigned_by="323456789012345678",
+            assigned_at="2026-11-18T12:00:00",
         )
         self.assertEqual(result["assigned_to"], "423456789012345678")
         self.assertTrue(session.calls[0][1].endswith("/assign"))
         self.assertEqual(session.calls[0][2]["json"]["assigned_by"], "323456789012345678")
+        self.assertEqual(session.calls[0][2]["json"]["guild_id"], "123456789012345678")
 
 
     async def test_guild_config_update_and_read(self):
