@@ -177,7 +177,7 @@ async function handle(request, env) {
     const validId = value => typeof value === "string" && /^[0-9]{15,22}$/.test(value);
     if (typeof ticket_id !== "string" || ticket_id.length > 64 || !validId(guild_id) || !validId(channel_id) || !validId(owner_id) || typeof reason !== "string" || !reason.trim() || reason.length > 1000 || typeof created_at !== "string" || !Number.isFinite(Date.parse(created_at))) return json({ error: "Invalid ticket data" }, 400);
     try {
-      await env.DB.prepare("INSERT INTO support_tickets (ticket_id, guild_id, channel_id, owner_id, reason, status, created_at) VALUES (?, ?, ?, ?, ?, 'open', ?)").bind(ticket_id, guild_id, channel_id, owner_id, reason.trim(), created_at).run();
+      await env.DB.prepare("INSERT INTO support_tickets (ticket_id, guild_id, channel_id, owner_id, reason, status, created_at, automation_started_at) VALUES (?, ?, ?, ?, ?, 'open', ?, ?)").bind(ticket_id, guild_id, channel_id, owner_id, reason.trim(), created_at, created_at).run();
     } catch (error) {
       if (/unique constraint failed|constraint failed/i.test(String(error?.message || error))) return json({ error: "This member already has an open ticket or the ticket already exists" }, 409);
       throw error;
