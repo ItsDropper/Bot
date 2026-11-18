@@ -213,6 +213,71 @@ async function handle(request, env) {
     return json({ stats: { total: stats.total || 0, open: stats.open || 0, closed: stats.closed || 0 } });
   }
 
+  const ticketActivityMatch = path.match(/^\\/v1\\/tickets\\/channel\\/([0-9]{15,22})\\/activity$/);
+  if (ticketActivityMatch && request.method === "GET") {
+    const url = new URL(request.url);
+    const guildId = url.searchParams.get("guild_id") || "";
+    const limit = Number(url.searchParams.get("limit") || 15);
+    if (!/^[0-9]{15,22}$/.test(guildId) || !Number.isInteger(limit) || limit < 1 || limit > 25) {
+      return json({ error: "Invalid ticket activity query" }, 400);
+    }
+    const ticket = await env.DB.prepare(
+      "SELECT ticket_id FROM support_tickets WHERE guild_id = ? AND channel_id = ?"
+    ).bind(guildId, ticketActivityMatch[1]).first();
+    if (!ticket) return json({ error: "Ticket not found" }, 404);
+    const rows = await env.DB.prepare(
+      "SELECT event_id, ticket_id, guild_id, channel_id, actor_id, action, details, created_at FROM support_ticket_activity WHERE guild_id = ? AND channel_id = ? ORDER BY event_id DESC LIMIT ?"
+    ).bind(guildId, ticketActivityMatch[1], limit).all();
+    return json({ events: rows.results || [] });
+  }
+
+  const ticketNoteMatch = path.match(/^\\/v1\\/tickets\\/channel\\/([0-9]{15,22})\\/notes$/);
+  if (ticketNoteMatch && request.method === "POST") {
+    let body;
+    try { body = await readJson(request); } catch { return json({ error: "Invalid JSON request body" }, 400); }
+    const validId = value => typeof value === "string" && /^[0-9]{15,22}$/.test(value);
+    if (!validId(body?.guild_id) || !validId(body?.actor_id) ||
+        typeof body?.note !== "string" || !body.note.trim() || body.note.length > 1000 ||
+        typeof body?.created_at !== "string" || !Number.isFinite(Date.parse(body.created_at))) {
+      return json({ error: "Invalid internal ticket note" }, 400);
+    }
+    const event = await env.DB.prepare(
+      "INSERT INTO support_ticket_activity (ticket_id, guild_id, channel_id, actor_id, action, details, created_at) " +
+      "SELECT ticket_id, guild_id, channel_id, ?, 'internal_note', ?, ? FROM support_tickets " +
+      "WHERE guild_id = ? AND channel_id = ? AND status = 'open' RETURNING *"
+    ).bind(body.actor_id, JSON.stringify({ note: body.note.trim() }), body.created_at,
+      body.guild_id, ticketNoteMatch[1]).first();
+    if (!event) return json({ error: "Open ticket not found" }, 404);
+    return json({ event }, 201);
+  }
+
+  const ticketPriorityMatch = path.match(/^\\/v1\\/tickets\\/channel\\/([0-9]{15,22})\\/priority$/);
+  if (ticketPriorityMatch && request.method === "PATCH") {
+    let body;
+    try { body = await readJson(request); } catch { return json({ error: "Invalid JSON request body" }, 400); }
+    const validId = value => typeof value === "string" && /^[0-9]{15,22}$/.test(value);
+    if (!validId(body?.guild_id) || !validId(body?.actor_id) ||
+        !["low", "normal", "high", "urgent"].includes(body?.priority) ||
+        typeof body?.created_at !== "string" || !Number.isFinite(Date.parse(body.created_at))) {
+      return json({ error: "Invalid ticket priority update" }, 400);
+    }
+    const update = env.DB.prepare(
+      "UPDATE support_tickets SET priority = ? WHERE guild_id = ? AND channel_id = ? AND status = 'open'"
+    ).bind(body.priority, body.guild_id, ticketPriorityMatch[1]);
+    const activity = env.DB.prepare(
+      "INSERT INTO support_ticket_activity (ticket_id, guild_id, channel_id, actor_id, action, details, created_at) " +
+      "SELECT ticket_id, guild_id, channel_id, ?, 'priority_changed', ?, ? FROM support_tickets " +
+      "WHERE guild_id = ? AND channel_id = ? AND status = 'open'"
+    ).bind(body.actor_id, JSON.stringify({ priority: body.priority }), body.created_at,
+      body.guild_id, ticketPriorityMatch[1]);
+    const results = await env.DB.batch([update, activity]);
+    if (!results[0]?.meta?.changes) return json({ error: "Open ticket not found" }, 404);
+    const ticket = await env.DB.prepare(
+      "SELECT * FROM support_tickets WHERE guild_id = ? AND channel_id = ?"
+    ).bind(body.guild_id, ticketPriorityMatch[1]).first();
+    return json({ ticket });
+  }
+
   const assignTicketMatch = path.match(/^\/v1\/tickets\/channel\/([0-9]{15,22})\/assign$/);
   if (assignTicketMatch && request.method === "PATCH") {
     let body;
