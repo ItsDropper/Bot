@@ -71,7 +71,7 @@ Do not manually delete D1 migration records or rerun destructive schema operatio
 ## Member onboarding and ticket automation
 
 - Enable the **Server Members Intent** in the Discord Developer Portal (Bot → Privileged Gateway Intents). The bot requests this intent to receive member-join events. `MESSAGE CONTENT INTENT` is not required; ticket tracking stores only actor IDs and timestamps, never message text.
-- New members receive a branded welcome embed in the server system channel, falling back to `#welcome`, `#start-here` or `#introductions`. The persistent **Getting started** button opens a private onboarding guide.
+- New members receive a branded welcome embed by direct message. The persistent **Getting started** button opens a private onboarding guide. The bot never posts a welcome message in a public server channel. If the member's DM privacy settings block the bot, delivery is skipped and logged; there is deliberately no public fallback.
 - The bot records customer and staff ticket message timestamps in D1. It does not archive message contents.
 - Every 15 minutes, open tickets waiting more than two hours for a staff response are escalated in their ticket channel with a support-role-only mention. A ticket is escalated once per unanswered customer message; a new customer reply resets the escalation state. A staff reply clears the waiting condition.
 - Ensure the bot can view ticket channels, send embeds and mention the configured support role. The support role must allow the bot to mention it.
