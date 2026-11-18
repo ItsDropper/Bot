@@ -8,6 +8,7 @@ function fakeDb(row = null) {
     calls,
     prepare(sql) {
       const statement = {
+        sql,
         values: [],
         bind(...values) {
           this.values = values;
