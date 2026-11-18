@@ -34,10 +34,10 @@ class TechnicalSupportIntakeTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "report is too long"):
             build_technical_report(
                 summary="x" * 300,
-                minecraft_version="1.21.11",
-                loader="Fabric " + "x" * 80,
-                launcher_version="Vanta " + "x" * 40,
-                log_url="https://example.com/" + "x" * 300,
+                minecraft_version="x" * 300,
+                loader="x" * 300,
+                launcher_version="x" * 300,
+                log_url="https://example.com/" + "x" * 280,
             )
 
 
