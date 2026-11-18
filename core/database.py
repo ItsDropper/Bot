@@ -166,6 +166,41 @@ class CloudflareDatabase:
         return result["stats"]
 
 
+
+    async def get_guild_config(self, guild_id: str):
+        result = await self._request("GET", f"/v1/guilds/{quote(str(guild_id), safe='')}/config")
+        return result.get("config")
+
+    async def update_guild_config(self, guild_id: str, *, updated_by: str, updated_at: str, **values):
+        allowed = {
+            "support_category_id", "support_role_id", "ticket_log_channel_id",
+            "application_result_channel_id", "launcher_announcement_channel_id",
+            "launcher_announcement_role_id",
+        }
+        if set(values) - allowed:
+            raise ValueError("Unsupported guild configuration field")
+        payload = {key: (str(value) if value else None) for key, value in values.items()}
+        payload.update(updated_by=str(updated_by), updated_at=updated_at)
+        result = await self._request("PUT", f"/v1/guilds/{quote(str(guild_id), safe='')}/config", payload=payload)
+        return result["config"]
+
+    async def append_audit_event(self, *, guild_id: str, actor_id: str, action: str,
+                                 target_id: str | None = None, details=None, created_at: str):
+        result = await self._request("POST", "/v1/audit-events", payload={
+            "guild_id": str(guild_id), "actor_id": str(actor_id), "action": action,
+            "target_id": str(target_id) if target_id else None,
+            "details": details or {}, "created_at": created_at,
+        })
+        return result.get("event_id")
+
+    async def list_audit_events(self, guild_id: str, *, limit: int = 10, offset: int = 0):
+        if not 1 <= limit <= 25 or offset < 0:
+            raise ValueError("Invalid audit query")
+        result = await self._request(
+            "GET", f"/v1/audit-events?guild_id={quote(str(guild_id), safe='')}&limit={limit}&offset={offset}"
+        )
+        return result["events"]
+
     async def assign_support_ticket(self, channel_id: str, assigned_to: str,
                                     assigned_by: str, assigned_at: str):
         result = await self._request(
