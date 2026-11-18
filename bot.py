@@ -634,7 +634,6 @@ async def announce_launcher_update(interaction: discord.Interaction):
                     raise RuntimeError(f"GitHub returned HTTP {response.status}")
                 release = await response.json()
         tag = release.get("tag_name")
-        release_name = release.get("name") or f"Vanta Launcher {tag}"
         release_url = release.get("html_url")
         if (not isinstance(tag, str) or not tag or not isinstance(release_url, str)
                 or not release_url.startswith("https://github.com/ItsDropper/Vanta/releases/")):
