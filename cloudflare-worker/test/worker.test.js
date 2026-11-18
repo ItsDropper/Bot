@@ -28,6 +28,13 @@ function fakeDb(row = null) {
       };
       return statement;
     },
+    async batch(statements) {
+      const results = statements.map(statement => {
+        calls.push({ sql: statement.sql, values: statement.values });
+        return { meta: { changes: 1 } };
+      });
+      return results;
+    },
   };
 }
 
@@ -488,4 +495,98 @@ test("rejects unbounded moderation case pagination", async () => {
   );
   assert.equal(response.status, 400);
   assert.equal(DB.calls.length, 0);
+});
+
+
+test("stores internal ticket notes without publishing them to Discord", async () => {
+  const event = { event_id: 9, action: "internal_note", actor_id: "323456789012345678" };
+  const DB = fakeDb(event);
+  const token = "a".repeat(48);
+  const response = await worker.fetch(
+    new Request("https://worker.example/v1/tickets/channel/223456789012345678/notes", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        guild_id: "123456789012345678",
+        actor_id: "323456789012345678",
+        note: "Check crash logs before replying",
+        created_at: "2026-11-18T12:00:00Z",
+      }),
+    }),
+    { DB, BOT_API_TOKEN: token },
+  );
+  assert.equal(response.status, 201);
+  assert.deepEqual(await response.json(), { event });
+  assert.match(DB.calls[0].sql, /INSERT INTO support_ticket_activity/);
+  assert.deepEqual(DB.calls[0].values.slice(-2), ["123456789012345678", "223456789012345678"]);
+});
+
+test("rejects invalid internal ticket notes before SQL", async () => {
+  const DB = fakeDb();
+  const token = "b".repeat(48);
+  const response = await worker.fetch(
+    new Request("https://worker.example/v1/tickets/channel/223456789012345678/notes", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        guild_id: "123456789012345678", actor_id: "323456789012345678",
+        note: " ", created_at: "not-a-date",
+      }),
+    }),
+    { DB, BOT_API_TOKEN: token },
+  );
+  assert.equal(response.status, 400);
+  assert.equal(DB.calls.length, 0);
+});
+
+test("updates ticket priority and activity in one D1 batch", async () => {
+  const DB = fakeDb({ ticket_id: "123:223", priority: "urgent" });
+  const token = "c".repeat(48);
+  const response = await worker.fetch(
+    new Request("https://worker.example/v1/tickets/channel/223456789012345678/priority", {
+      method: "PATCH",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        guild_id: "123456789012345678", actor_id: "323456789012345678",
+        priority: "urgent", created_at: "2026-11-18T12:00:00Z",
+      }),
+    }),
+    { DB, BOT_API_TOKEN: token },
+  );
+  assert.equal(response.status, 200);
+  assert.match(DB.calls[0].sql, /UPDATE support_tickets SET priority/);
+  assert.match(DB.calls[1].sql, /INSERT INTO support_ticket_activity/);
+  assert.deepEqual(DB.calls[0].values, ["urgent", "123456789012345678", "223456789012345678"]);
+});
+
+test("rejects unsupported ticket priority before SQL", async () => {
+  const DB = fakeDb();
+  const token = "d".repeat(48);
+  const response = await worker.fetch(
+    new Request("https://worker.example/v1/tickets/channel/223456789012345678/priority", {
+      method: "PATCH",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        guild_id: "123456789012345678", actor_id: "323456789012345678",
+        priority: "critical", created_at: "2026-11-18T12:00:00Z",
+      }),
+    }),
+    { DB, BOT_API_TOKEN: token },
+  );
+  assert.equal(response.status, 400);
+  assert.equal(DB.calls.length, 0);
+});
+
+test("lists ticket activity with guild and channel isolation", async () => {
+  const DB = fakeDb({ ticket_id: "123:223" });
+  const token = "e".repeat(48);
+  const response = await worker.fetch(
+    new Request("https://worker.example/v1/tickets/channel/223456789012345678/activity?guild_id=123456789012345678&limit=10", {
+      headers: { Authorization: `Bearer ${token}` },
+    }),
+    { DB, BOT_API_TOKEN: token },
+  );
+  assert.equal(response.status, 200);
+  assert.deepEqual(DB.calls[0].values, ["123456789012345678", "223456789012345678"]);
+  assert.deepEqual(DB.calls[1].values, ["123456789012345678", "223456789012345678", 10]);
 });
