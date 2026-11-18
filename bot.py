@@ -9,6 +9,7 @@ from discord.ext import tasks
 from aiohttp import web
 
 from core.database import CloudflareDatabase, DatabaseError, MinecraftLinkConflict
+from core.audit import AuditService
 
 PORT = int(os.environ.get("PORT", 3001))
 
@@ -23,6 +24,7 @@ intents = discord.Intents.default()
 # ── Cloudflare D1 ─────────────────────────────────────────────────────────────
 
 database: CloudflareDatabase | None = None
+BOT_STARTED_AT = datetime.utcnow()
 
 async def init_db():
     global database
@@ -46,10 +48,9 @@ async def init_db():
 async def record_audit(guild_id: int, actor_id: int, action: str, *, target_id=None, details=None):
     """Persist an attributable operational event without masking the primary operation."""
     try:
-        await database.append_audit_event(
-            guild_id=str(guild_id), actor_id=str(actor_id), action=action,
-            target_id=str(target_id) if target_id else None,
-            details=details or {}, created_at=datetime.utcnow().isoformat(),
+        await AuditService(database).record(
+            guild_id=guild_id, actor_id=actor_id, action=action,
+            target_id=target_id, details=details or {}, created_at=datetime.utcnow().isoformat(),
         )
     except Exception as exc:
         print(f"Audit persistence failed for {action} in guild {guild_id}: {type(exc).__name__}: {exc}")
@@ -1107,6 +1108,52 @@ async def serverconfig(
     embed = discord.Embed(title="VANTA  /  SERVER CONFIGURATION",
                           description="\n".join(lines), color=0x3978F6)
     embed.set_footer(text="Only server administrators can view or change this configuration")
+    await interaction.followup.send(embed=embed, ephemeral=True)
+
+
+
+@tree.command(name="botdashboard", description="Open the Vanta Bot operations dashboard")
+@support_only()
+async def botdashboard(interaction: discord.Interaction):
+    await interaction.response.defer(ephemeral=True)
+    database_ok = True
+    try:
+        await database.healthcheck()
+        ticket_stats, link_stats = await asyncio.gather(
+            database.get_support_ticket_stats(str(interaction.guild.id)),
+            database.get_minecraft_link_stats(),
+        )
+    except Exception:
+        database_ok = False
+        ticket_stats = {"total": 0, "open": 0, "closed": 0}
+        link_stats = {"total": 0}
+    embed = discord.Embed(
+        title="VANTA  /  OPERATIONS",
+        description="Live operational snapshot for this Discord server.",
+        color=0x3978F6 if database_ok else 0xD83C3E,
+    )
+    embed.add_field(
+        name="Platform status",
+        value=f"**Discord:** Connected\\n**D1:** {'Healthy' if database_ok else 'Degraded'}\\n**Gateway latency:** {round(client.latency * 1000)} ms",
+        inline=True,
+    )
+    embed.add_field(
+        name="Support operations",
+        value=f"**Total:** {ticket_stats['total']:,}\\n**Open:** {ticket_stats['open']:,}\\n**Closed:** {ticket_stats['closed']:,}",
+        inline=True,
+    )
+    embed.add_field(
+        name="Minecraft links",
+        value=f"**Registered:** {int(link_stats.get('total') or 0):,}",
+        inline=True,
+    )
+    uptime = datetime.utcnow() - BOT_STARTED_AT
+    hours, remainder = divmod(int(uptime.total_seconds()), 3600)
+    minutes = remainder // 60
+    embed.add_field(name="Runtime", value=f"**Uptime:** {hours}h {minutes}m\\n**Guild:** {discord.utils.escape_markdown(interaction.guild.name)}", inline=False)
+    embed.set_author(name="VANTA  •  PLATFORM CONTROL")
+    embed.set_footer(text=f"Requested by {interaction.user} · Metrics queried live from D1")
+    embed.timestamp = datetime.utcnow()
     await interaction.followup.send(embed=embed, ephemeral=True)
 
 
