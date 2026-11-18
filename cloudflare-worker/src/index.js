@@ -121,6 +121,23 @@ async function handle(request, env) {
     return json({ stats: { total: stats.total || 0, open: stats.open || 0, closed: stats.closed || 0 } });
   }
 
+  const assignTicketMatch = path.match(/^\/v1\/tickets\/channel\/([0-9]{15,22})\/assign$/);
+  if (assignTicketMatch && request.method === "PATCH") {
+    let body;
+    try { body = await readJson(request); } catch { return json({ error: "Invalid JSON request body" }, 400); }
+    if (typeof body?.assigned_to !== "string" || !/^[0-9]{15,22}$/.test(body.assigned_to) ||
+        typeof body?.assigned_by !== "string" || !/^[0-9]{15,22}$/.test(body.assigned_by) ||
+        typeof body?.assigned_at !== "string" || !Number.isFinite(Date.parse(body.assigned_at))) {
+      return json({ error: "Invalid ticket assignment data" }, 400);
+    }
+    const existing = await env.DB.prepare("SELECT * FROM support_tickets WHERE channel_id = ?").bind(assignTicketMatch[1]).first();
+    if (!existing) return json({ error: "Ticket not found" }, 404);
+    if (existing.status !== "open") return json({ error: "Closed tickets cannot be assigned" }, 409);
+    await env.DB.prepare("UPDATE support_tickets SET assigned_to = ?, assigned_by = ?, assigned_at = ? WHERE channel_id = ? AND status = 'open'").bind(body.assigned_to, body.assigned_by, body.assigned_at, assignTicketMatch[1]).run();
+    const ticket = await env.DB.prepare("SELECT * FROM support_tickets WHERE channel_id = ?").bind(assignTicketMatch[1]).first();
+    return json({ ticket });
+  }
+
   const closeTicketMatch = path.match(/^\/v1\/tickets\/channel\/([0-9]{15,22})\/close$/);
   if (closeTicketMatch && request.method === "PATCH") {
     let body;
