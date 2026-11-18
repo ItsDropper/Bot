@@ -64,6 +64,7 @@ Cloudflare deployment applies all pending files in `cloudflare-worker/migrations
 - `0008_ticket_activity.sql`: ticket priorities and staff activity
 - `0009_ticket_automation.sql`: ticket message timestamps, first-response tracking and escalation state
 - `0010_ticket_automation_window.sql`: prevents historical tickets from being escalated immediately after rollout
+- `0011_ticket_activity_event_types.sql`: permits persisted assignment, response and automation events
 
 Do not manually delete D1 migration records or rerun destructive schema operations. Use the deployment workflow so migration state remains tracked.
 
