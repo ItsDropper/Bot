@@ -178,3 +178,26 @@ test("ticket statistics are scoped to one guild", async () => {
   assert.deepEqual(await response.json(), { stats: { total: 9, open: 2, closed: 7 } });
   assert.deepEqual(DB.calls[0].values, ["123456789012345678"]);
 });
+
+
+test("assigns an open support ticket with assignment audit fields", async () => {
+  const DB = fakeDb({ ticket_id: "1:2", status: "open" });
+  const token = "k".repeat(48);
+  const response = await worker.fetch(
+    new Request("https://worker.example/v1/tickets/channel/223456789012345678/assign", {
+      method: "PATCH",
+      headers: { Authorization: \`Bearer \${token}\`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        assigned_to: "423456789012345678",
+        assigned_by: "323456789012345678",
+        assigned_at: "2026-11-18T12:00:00",
+      }),
+    }),
+    { DB, BOT_API_TOKEN: token },
+  );
+  assert.equal(response.status, 200);
+  assert.deepEqual(DB.calls[1].values, [
+    "423456789012345678", "323456789012345678",
+    "2026-11-18T12:00:00", "223456789012345678",
+  ]);
+});
