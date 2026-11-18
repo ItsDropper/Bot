@@ -130,3 +130,35 @@ class CloudflareDatabase:
             "GET", f"/v1/minecraft-links?limit={limit}&offset={offset}"
         )
         return result["links"], result["total"]
+
+
+    async def create_support_ticket(self, *, ticket_id: str, guild_id: str, channel_id: str,
+                                    owner_id: str, reason: str, created_at: str):
+        result = await self._request("POST", "/v1/tickets", payload={
+            "ticket_id": ticket_id, "guild_id": guild_id, "channel_id": channel_id,
+            "owner_id": owner_id, "reason": reason, "created_at": created_at,
+        })
+        return result["ticket"]
+
+    async def close_support_ticket(self, channel_id: str, closed_by: str, closed_at: str):
+        result = await self._request(
+            "PATCH", f"/v1/tickets/channel/{quote(str(channel_id), safe='')}/close",
+            payload={"closed_by": str(closed_by), "closed_at": closed_at},
+        )
+        return result["ticket"]
+
+    async def list_support_tickets(self, guild_id: str, *, owner_id: str | None = None,
+                                   status: str = "all", limit: int = 10, offset: int = 0):
+        if status not in {"all", "open", "closed"} or not 1 <= limit <= 25 or offset < 0:
+            raise ValueError("Invalid support ticket query")
+        params = f"guild_id={quote(str(guild_id), safe='')}&status={status}&limit={limit}&offset={offset}"
+        if owner_id:
+            params += f"&owner_id={quote(str(owner_id), safe='')}"
+        result = await self._request("GET", f"/v1/tickets?{params}")
+        return result["tickets"], result["total"]
+
+    async def get_support_ticket_stats(self, guild_id: str):
+        result = await self._request(
+            "GET", f"/v1/tickets/stats?guild_id={quote(str(guild_id), safe='')}"
+        )
+        return result["stats"]
