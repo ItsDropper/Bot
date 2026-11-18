@@ -9,7 +9,7 @@ from discord import app_commands
 from core.database import DatabaseError
 
 
-def register_ticket_commands(tree, database_provider, support_only):
+def register_ticket_commands(tree, database_provider, support_only, audit_recorder):
     def database():
         value = database_provider()
         if value is None:
@@ -35,6 +35,10 @@ def register_ticket_commands(tree, database_provider, support_only):
         except DatabaseError as exc:
             await interaction.followup.send(f"Could not save internal note: {exc}", ephemeral=True)
             return
+        await audit_recorder(
+            interaction.guild.id, interaction.user.id, "ticket.internal_note",
+            target_id=channel.id, details={"note_length": len(note)},
+        )
         await interaction.followup.send(
             f"Private note saved to {channel.mention}. It is stored in D1 and was not posted in the ticket.",
             ephemeral=True,
@@ -65,6 +69,10 @@ def register_ticket_commands(tree, database_provider, support_only):
         except DatabaseError as exc:
             await interaction.followup.send(f"Could not update ticket priority: {exc}", ephemeral=True)
             return
+        await audit_recorder(
+            interaction.guild.id, interaction.user.id, "ticket.priority_changed",
+            target_id=channel.id, details={"priority": priority.value},
+        )
         await interaction.followup.send(
             f"Priority for {channel.mention} set to **{ticket['priority'].upper()}**.",
             ephemeral=True,
