@@ -10,6 +10,7 @@ from aiohttp import web
 
 from core.database import CloudflareDatabase, DatabaseError, MinecraftLinkConflict
 from core.audit import AuditService
+from cogs.moderation import register_moderation_commands
 
 PORT = int(os.environ.get("PORT", 3001))
 
@@ -682,6 +683,7 @@ async def reconcile_ticket_close_controls(guild: discord.Guild):
 
 client = Client(intents=intents)
 tree = app_commands.CommandTree(client)
+register_moderation_commands(tree, lambda: database, record_audit)
 
 @client.event
 async def on_guild_join(guild):
