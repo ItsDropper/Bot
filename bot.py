@@ -95,7 +95,14 @@ class CloseSupportTicketView(discord.ui.View):
                 "Only the ticket creator or support staff can close this ticket.", ephemeral=True
             )
             return
-        await interaction.response.send_message("Closing ticket...", ephemeral=True)
+        await interaction.response.defer(ephemeral=True)
+        try:
+            await database.close_support_ticket(
+                str(interaction.channel.id), str(interaction.user.id), datetime.utcnow().isoformat()
+            )
+        except DatabaseError as exc:
+            await interaction.followup.send(f"Could not close ticket safely: {exc}", ephemeral=True)
+            return
         if TICKET_LOG_CHANNEL_ID:
             log_channel = interaction.guild.get_channel(TICKET_LOG_CHANNEL_ID)
             if log_channel:
@@ -104,6 +111,7 @@ class CloseSupportTicketView(discord.ui.View):
                 embed.add_field(name="Closed by", value=interaction.user.mention, inline=True)
                 embed.set_footer(text=datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC"))
                 await log_channel.send(embed=embed)
+        await interaction.followup.send('Ticket closed and recorded in the database.', ephemeral=True)
         await interaction.channel.delete()
 
     @discord.ui.button(label="Close Ticket", style=discord.ButtonStyle.danger,
@@ -159,12 +167,28 @@ class SupportTicketModal(discord.ui.Modal, title="Create Support Ticket"):
 
         safe_name = interaction.user.name.lower().replace(" ", "-")[:20]
 
+        await interaction.response.defer(ephemeral=True)
         channel = await guild.create_text_channel(
             name=f"support-{safe_name}",
             category=category,
             overwrites=overwrites,
             topic=f"vanta_ticket_owner:{interaction.user.id}"
         )
+        try:
+            await database.create_support_ticket(
+                ticket_id=f"{guild.id}:{channel.id}",
+                guild_id=str(guild.id),
+                channel_id=str(channel.id),
+                owner_id=str(interaction.user.id),
+                reason=self.reason.value,
+                created_at=datetime.utcnow().isoformat(),
+            )
+        except DatabaseError as exc:
+            await channel.delete(reason="Ticket database registration failed")
+            await interaction.followup.send(
+                f"Ticket could not be registered. No ticket was left open. {exc}", ephemeral=True
+            )
+            return
 
         embed = discord.Embed(title="🎫 Support Ticket", color=discord.Color.blurple())
         embed.add_field(name="Discord", value=interaction.user.mention, inline=True)
@@ -175,7 +199,7 @@ class SupportTicketModal(discord.ui.Modal, title="Create Support Ticket"):
 
         ping = support_role.mention if support_role else "@support"
         await channel.send(content=ping, embed=embed, view=CloseSupportTicketView())
-        await interaction.response.send_message(
+        await interaction.followup.send(
             f"Ticket created: {channel.mention}", ephemeral=True
         )
 
