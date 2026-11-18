@@ -347,7 +347,7 @@ class SupportPanelView(discord.ui.View):
 
 
 
-APPLICATION_RESULT_CHANNEL_ID = 1514193984094732383
+APPLICATION_RESULT_CHANNEL_ID = 1530651965908848641
 
 class StaffApplicationModal(discord.ui.Modal, title="Staff Application"):
     age = discord.ui.TextInput(label="How old are you?", placeholder="Your age", max_length=20)
